@@ -768,6 +768,59 @@ app.get('/api/support/tickets/:ticketId', authMiddleware, async (req, res) => {
   }
 });
 
+// Admin endpoint to add response to a ticket
+app.post('/api/admin/tickets/:ticketId/respond', async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { response, status } = req.body;
+    const adminKey = req.query.key || req.headers['x-admin-key'];
+    const expectedKey = process.env.ADMIN_KEY || 'focufy-admin-2024';
+    
+    if (adminKey !== expectedKey) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (!response || !response.trim()) {
+      return res.status(400).json({ error: 'Response message is required' });
+    }
+
+    const ticket = supportTickets.get(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    // Add response
+    ticket.responses.push({
+      message: response.trim(),
+      respondedBy: 'Admin',
+      respondedAt: new Date().toISOString()
+    });
+
+    // Update status if provided
+    if (status && ['open', 'closed', 'pending'].includes(status)) {
+      ticket.status = status;
+    }
+
+    ticket.updatedAt = new Date().toISOString();
+    supportTickets.set(ticketId, ticket);
+
+    console.log(`✅ Response added to ticket ${ticketId} by admin`);
+
+    res.json({
+      success: true,
+      message: 'Response added successfully',
+      ticket: {
+        ticketId: ticket.ticketId,
+        status: ticket.status,
+        responses: ticket.responses
+      }
+    });
+  } catch (error) {
+    console.error('Add response error:', error);
+    res.status(500).json({ error: 'Failed to add response' });
+  }
+});
+
 // AI Support Chat Endpoint (enhanced)
 app.post('/api/support/chat', authMiddleware, async (req, res) => {
   try {
@@ -945,6 +998,24 @@ app.get('/admin/tickets', async (req, res) => {
         .ticket-subject { font-size: 18px; font-weight: 600; color: #1e293b; margin: 10px 0; }
         .ticket-meta { display: flex; gap: 15px; font-size: 12px; color: #64748b; margin-bottom: 15px; }
         .ticket-message { background: white; padding: 15px; border-radius: 6px; border-left: 3px solid #667eea; margin-top: 10px; white-space: pre-wrap; }
+        .responses-section { margin-top: 20px; padding-top: 20px; border-top: 2px solid #e2e8f0; }
+        .responses-section h3 { font-size: 16px; color: #1e293b; margin-bottom: 15px; }
+        .response-item { background: white; padding: 15px; border-radius: 6px; border-left: 3px solid #10b981; margin-bottom: 10px; }
+        .response-header { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; }
+        .response-header strong { color: #10b981; }
+        .response-date { color: #64748b; }
+        .response-message { color: #1e293b; white-space: pre-wrap; }
+        .response-form { margin-top: 20px; padding-top: 20px; border-top: 2px solid #e2e8f0; }
+        .response-form h3 { font-size: 16px; color: #1e293b; margin-bottom: 10px; }
+        .response-textarea { width: 100%; padding: 12px; border: 2px solid #e2e8f0; border-radius: 6px; font-family: inherit; font-size: 14px; margin-bottom: 10px; resize: vertical; }
+        .response-textarea:focus { outline: none; border-color: #667eea; }
+        .response-actions { display: flex; gap: 10px; align-items: center; }
+        .status-select { padding: 8px 12px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px; }
+        .submit-response-btn { background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+        .submit-response-btn:hover { background: #059669; }
+        .response-status { margin-top: 10px; padding: 8px; border-radius: 4px; font-size: 14px; }
+        .response-status.success { background: #d1fae5; color: #065f46; }
+        .response-status.error { background: #fee2e2; color: #991b1b; }
         .refresh-btn { background: #667eea; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; margin-bottom: 20px; }
         .refresh-btn:hover { background: #5568d3; }
       </style>
@@ -985,6 +1056,54 @@ app.get('/admin/tickets', async (req, res) => {
           </div>
         `).join('')}
       </div>
+      
+      <script>
+        const adminKey = new URLSearchParams(window.location.search).get('key');
+        
+        async function submitResponse(ticketId) {
+          const responseText = document.getElementById('response-' + ticketId).value.trim();
+          const status = document.getElementById('status-' + ticketId).value;
+          const statusDiv = document.getElementById('response-status-' + ticketId);
+          
+          if (!responseText) {
+            statusDiv.className = 'response-status error';
+            statusDiv.textContent = 'Please enter a response message.';
+            return;
+          }
+          
+          statusDiv.className = 'response-status';
+          statusDiv.textContent = 'Sending...';
+          
+          try {
+            const response = await fetch(\`/api/admin/tickets/\${ticketId}/respond?key=\${adminKey}\`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                response: responseText,
+                status: status
+              })
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+              statusDiv.className = 'response-status success';
+              statusDiv.textContent = '✅ Response sent successfully!';
+              document.getElementById('response-' + ticketId).value = '';
+              setTimeout(() => {
+                location.reload();
+              }, 1000);
+            } else {
+              throw new Error(data.error || 'Failed to send response');
+            }
+          } catch (error) {
+            statusDiv.className = 'response-status error';
+            statusDiv.textContent = '❌ Error: ' + error.message;
+          }
+        }
+      </script>
     </body>
     </html>
   `;
