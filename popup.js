@@ -838,22 +838,7 @@ async function signInWithGoogle() {
     
     console.log('Got token! Fetching user info...');
     
-    // Get user info from Google
-    const urlHash = responseUrl.split('#')[1];
-    if (!urlHash) {
-      throw new Error('No token in response');
-    }
-    
-    const params = new URLSearchParams(urlHash);
-    const token = params.get('access_token');
-    
-    if (!token) {
-      throw new Error('No access token received');
-    }
-    
-    console.log('Got token! Fetching user info...');
-    
-    // Get user info from Google
+    // Get user info from Google using the token
     const userInfo = await fetchUserInfoFromGoogle(token);
     
     if (!userInfo || !userInfo.email) {
