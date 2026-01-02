@@ -160,8 +160,64 @@ async function generateUserApiKeyWithServiceAccount(userId, userEmail) {
       return keyData.keyString;
     }
     
-    // The response contains the key name, but we need to get the actual key string
-    const keyName = keyData.name;
+    // Check if this is an async operation (operation name starts with "operations/")
+    let keyName = keyData.name;
+    if (keyName && keyName.startsWith('operations/')) {
+      console.log(`⏳ API key creation is async, polling operation: ${keyName}`);
+      
+      // Poll the operation until it's done
+      const operationName = keyName;
+      let operation = null;
+      const maxAttempts = 30; // 30 attempts * 2 seconds = 60 seconds max
+      let attempts = 0;
+      
+      while (attempts < maxAttempts) {
+        attempts++;
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds between polls
+        
+        const operationResponse = await fetch(
+          `https://apikeys.googleapis.com/v2/${operationName}`,
+          {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        
+        if (!operationResponse.ok) {
+          const errorText = await operationResponse.text();
+          throw new Error(`Failed to poll operation: ${operationResponse.status} - ${errorText}`);
+        }
+        
+        operation = await operationResponse.json();
+        console.log(`📊 Operation status (attempt ${attempts}/${maxAttempts}):`, operation.done ? 'DONE' : 'IN_PROGRESS');
+        
+        if (operation.done) {
+          break; // Operation completed
+        }
+      }
+      
+      if (!operation || !operation.done) {
+        throw new Error(`Operation did not complete within ${maxAttempts * 2} seconds. Operation: ${operationName}`);
+      }
+      
+      // Extract the key name from the operation response
+      // The response should contain the key in operation.response.name
+      if (operation.response && operation.response.name) {
+        keyName = operation.response.name;
+        console.log(`✅ Operation completed, key name: ${keyName}`);
+      } else if (operation.response && operation.response.keyString) {
+        // Sometimes the key string is directly in the operation response
+        console.log(`✅ Operation completed, key string in response`);
+        return operation.response.keyString;
+      } else {
+        console.error('❌ Operation completed but no key name or keyString in response:', JSON.stringify(operation, null, 2));
+        throw new Error('Operation completed but could not extract key name from response');
+      }
+    }
+    
     if (!keyName) {
       throw new Error('API key created but no key name returned in response');
     }
