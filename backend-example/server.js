@@ -68,33 +68,68 @@ async function generateUserApiKeyWithServiceAccount(userId, userEmail) {
       throw new Error('Failed to get Service Account access token');
     }
     
-    // NOTE: Google Cloud API Key Management API doesn't support programmatic creation
-    // Instead, we'll use a pool of API keys and assign them to users
-    // This is a simpler and more reliable approach
+    // Create API key via Google Cloud API Key Management API
+    // This creates a REAL, unique API key for each user in YOUR Google Cloud project
+    const apiKeyResponse = await fetch(
+      `https://apikeys.googleapis.com/v2/projects/${GOOGLE_CLOUD_PROJECT_ID}/locations/global/keys`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          displayName: `Focufy-${userEmail}-${Date.now()}`,
+          restrictions: {
+            apiTargets: [{
+              service: 'generativelanguage.googleapis.com'
+            }]
+          }
+        })
+      }
+    );
     
-    // For now, use the fallback API key or a pool system
-    // In production, you'd want to:
-    // 1. Create multiple API keys manually in Google Cloud Console
-    // 2. Store them in a pool
-    // 3. Assign one to each user
-    
-    // Simple approach: Use the fallback key for now
-    // Each user gets their own "virtual" key (tracked by userId)
-    // but shares the actual API key (which has 10 req/sec limit per key)
-    
-    if (!GEMINI_API_KEY) {
-      throw new Error('No API key available. Set GEMINI_API_KEY environment variable.');
+    if (!apiKeyResponse.ok) {
+      const errorText = await apiKeyResponse.text();
+      console.error('API Key creation failed:', apiKeyResponse.status, errorText);
+      
+      // If 404, the API might not be enabled or endpoint is wrong
+      if (apiKeyResponse.status === 404) {
+        throw new Error(`API Key Management API not found. Make sure:
+1. "API Keys API" is enabled in Google Cloud Console
+2. Service Account has "Service Account Key Admin" or "Owner" role
+3. Project ID is correct: ${GOOGLE_CLOUD_PROJECT_ID}`);
+      }
+      
+      throw new Error(`Failed to create API key: ${apiKeyResponse.status} - ${errorText}`);
     }
     
-    // Return a unique identifier for this user's "key"
-    // The actual API calls will use GEMINI_API_KEY
-    // But we track usage per user
-    const userKeyId = `user-${userId}-${Date.now()}`;
+    const keyData = await apiKeyResponse.json();
     
-    console.log(`✅ Assigned API key access to user ${userId} (${userEmail})`);
+    // The response contains the key name, but we need to get the actual key string
+    const keyName = keyData.name;
     
-    // Return the shared API key (in production, you'd rotate keys from a pool)
-    return GEMINI_API_KEY;
+    // Get the actual key string (the secret)
+    const keyDetailsResponse = await fetch(
+      `https://apikeys.googleapis.com/v2/${keyName}:getKeyString`,
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+    
+    if (keyDetailsResponse.ok) {
+      const keyDetails = await keyDetailsResponse.json();
+      const actualKey = keyDetails.keyString;
+      console.log(`✅ Created unique API key for user ${userId} (${userEmail})`);
+      return actualKey;
+    }
+    
+    // Fallback: if we can't get the key string, try alternative endpoint
+    console.warn('Could not get key string, trying alternative method...');
+    throw new Error('Created key but could not retrieve key string. Check Service Account permissions.');
     
   } catch (error) {
     console.error('Error generating API key with Service Account:', error);
