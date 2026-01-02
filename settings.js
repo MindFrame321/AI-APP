@@ -52,13 +52,11 @@ async function loadSettings() {
       alwaysAllow: [],
       alwaysBlock: [],
       apiUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent',
-      backendUrl: '',
+      backendUrl: 'https://focufy-extension-1.onrender.com', // Pre-configured backend URL
       autoNavigateEnabled: true,
       learningModeEnabled: true
     };
     
-    document.getElementById('apiUrl').value = currentSettings.apiUrl || 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent';
-    document.getElementById('backendUrl').value = currentSettings.backendUrl || '';
     document.getElementById('autoNavigateEnabled').checked = currentSettings.autoNavigateEnabled !== false;
     document.getElementById('learningModeEnabled').checked = currentSettings.learningModeEnabled !== false;
     
@@ -136,8 +134,10 @@ function removeDomain(listType, domain) {
 
 async function saveSettings() {
   try {
-    currentSettings.apiUrl = document.getElementById('apiUrl').value.trim() || 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent';
-    currentSettings.backendUrl = document.getElementById('backendUrl').value.trim();
+    // API URL is now hardcoded to the default (no user configuration needed)
+    currentSettings.apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent';
+    // Backend URL is pre-configured
+    currentSettings.backendUrl = 'https://focufy-extension-1.onrender.com';
     currentSettings.autoNavigateEnabled = document.getElementById('autoNavigateEnabled').checked;
     currentSettings.learningModeEnabled = document.getElementById('learningModeEnabled').checked;
     
@@ -168,9 +168,8 @@ async function resetSettings() {
   currentSettings = {
     alwaysAllow: [],
     alwaysBlock: [],
-    apiKey: '',
     apiUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent',
-    backendUrl: '',
+    backendUrl: 'https://focufy-extension-1.onrender.com', // Pre-configured
     autoNavigateEnabled: true,
     learningModeEnabled: true
   };
@@ -218,16 +217,7 @@ function setupEventListeners() {
     }
   });
   
-  // Auto-check API key status when backend URL is entered
-  const backendUrlInput = document.getElementById('backendUrl');
-  if (backendUrlInput) {
-    backendUrlInput.addEventListener('blur', async () => {
-      const settings = await chrome.storage.local.get(['settings']);
-      if (settings.settings?.backendUrl) {
-        await checkUserApiKeyStatus();
-      }
-    });
-  }
+  // Backend URL is pre-configured, no need for input field
 }
 
 function showStatus(message, type) {
@@ -259,22 +249,16 @@ async function checkUserApiKeyStatus() {
       statusEl.classList.remove('hidden');
       statusEl.classList.add('error');
       statusEl.classList.remove('success');
-      statusText.textContent = '⚠️ Please sign in with Google first';
+      statusText.textContent = '⚠️ Please sign in with Google to get your API key automatically';
       return;
     }
     
-    // Check if backend URL is configured
-    if (!result.settings?.backendUrl) {
-      statusEl.classList.remove('hidden');
-      statusEl.classList.add('error');
-      statusEl.classList.remove('success');
-      statusText.innerHTML = '⚠️ Backend URL not set. Enter your backend URL above, then click "Generate API Key" below.';
-      return;
-    }
+    // Backend URL is pre-configured
+    const backendUrl = result.settings?.backendUrl || 'https://focufy-extension-1.onrender.com';
     
     // Try to check API key status
     try {
-      const response = await fetch(`${result.settings.backendUrl}/api/user-api-key`, {
+      const response = await fetch(`${backendUrl}/api/user-api-key`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${result.authToken}`
@@ -304,7 +288,7 @@ async function checkUserApiKeyStatus() {
             const newBtn = generateBtn.cloneNode(true);
             generateBtn.parentNode.replaceChild(newBtn, generateBtn);
             newBtn.addEventListener('click', async () => {
-              await generateApiKeyWithConsent(result.settings.backendUrl);
+              await generateApiKeyWithConsent(backendUrl);
             });
           }
         }
@@ -322,7 +306,7 @@ async function checkUserApiKeyStatus() {
         const newBtn = generateBtn.cloneNode(true);
         generateBtn.parentNode.replaceChild(newBtn, generateBtn);
         newBtn.addEventListener('click', async () => {
-          await generateApiKeyWithConsent(result.settings.backendUrl);
+          await generateApiKeyWithConsent(backendUrl);
         });
       }
     }

@@ -44,30 +44,9 @@
           <p class="status-text"></p>
         </div>
         <div class="form-group">
-          <label for="backendUrl">Backend Proxy URL <span style="color: #ef4444;">*Required</span></label>
-          <input type="text" id="backendUrl" placeholder="https://your-backend.onrender.com">
-          <p class="help-text">
-            <strong>What is this?</strong> This is the URL of your backend server that generates API keys automatically.
-            <br><br>
-            <strong>Quick Setup:</strong>
-            <ol style="margin: 8px 0; padding-left: 20px;">
-              <li>Deploy the backend from <code>backend-example/</code> folder to Render/Railway/Heroku</li>
-              <li>Copy the URL (e.g., <code>https://focufy-backend.onrender.com</code>)</li>
-              <li>Paste it here and click "Save Settings"</li>
-              <li>Click "Generate Now" button below to create your API key</li>
-            </ol>
-            <strong>See <code>SETUP_GUIDE.md</code> for detailed instructions.</strong>
+          <p class="help-text" style="color: #667eea; font-weight: 500; margin-bottom: 16px;">
+            ✨ <strong>Automatic API Key Generation:</strong> When you sign in with Google, a unique API key is automatically created for you. No manual setup needed!
           </p>
-        </div>
-        <div class="form-group">
-          <label for="apiKey">Direct API Key (Optional - Only if not using backend)</label>
-          <input type="password" id="apiKey" placeholder="AIza... (Leave empty if using backend)">
-          <p class="help-text">Only needed if you're NOT using a backend proxy. Get it from: <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a></p>
-        </div>
-        <div class="form-group">
-          <label for="apiUrl">API URL (Optional)</label>
-          <input type="text" id="apiUrl" placeholder="https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent">
-          <p class="help-text">Default: Gemini Pro API endpoint</p>
         </div>
       </section>
 
