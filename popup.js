@@ -538,13 +538,17 @@ async function autoGenerateApiKeyAfterSignIn() {
       return;
     }
     
+    // Pre-configured backend URL (fallback if not in settings)
+    const backendUrl = result.settings?.backendUrl || 'https://focufy-extension-1.onrender.com';
+    
+    // Ensure backend URL is saved in settings
     if (!result.settings?.backendUrl) {
-      console.log('No backend URL configured');
-      // Show helpful message to user
-      setTimeout(() => {
-        showStatus('💡 Set backend URL in settings to enable automatic API key generation', 'success');
-      }, 1000);
-      return;
+      await chrome.storage.local.set({
+        settings: {
+          ...result.settings,
+          backendUrl: backendUrl
+        }
+      });
     }
     
     console.log('🔄 Auto-generating API key after sign-in...');
@@ -553,7 +557,7 @@ async function autoGenerateApiKeyAfterSignIn() {
     // Check if user already has an API key
     let statusData = null;
     try {
-      const statusResponse = await fetch(`${result.settings.backendUrl}/api/user-api-key`, {
+      const statusResponse = await fetch(`${backendUrl}/api/user-api-key`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${result.authToken}`
@@ -579,7 +583,7 @@ async function autoGenerateApiKeyAfterSignIn() {
     // Generate API key automatically (user already gave consent by signing in)
     console.log('Generating new API key...');
     try {
-      const generateResponse = await fetch(`${result.settings.backendUrl}/api/generate-api-key`, {
+      const generateResponse = await fetch(`${backendUrl}/api/generate-api-key`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -816,53 +820,25 @@ async function signInWithGoogle() {
     showStatus('Signing in with Google...', 'success');
     
     // Check if chrome.identity is available
-    if (!chrome.identity) {
+    if (!chrome.identity || !chrome.identity.getAuthToken) {
       throw new Error('Chrome Identity API not available. Make sure you\'re running as a Chrome extension.');
     }
     
-    // Get the extension's redirect URL for launchWebAuthFlow
-    const redirectUrl = chrome.identity.getRedirectURL();
-    console.log('Redirect URL:', redirectUrl);
+    console.log('Getting Google auth token...');
     
-    // OAuth configuration - using Web application client with launchWebAuthFlow
-    const clientId = '42484888880-r0rgoel8vrhmk5tsdtfibb0jot3vgksd.apps.googleusercontent.com';
-    // Standard OAuth scopes (no special permissions needed - backend uses Service Account)
-    const scopes = ['openid', 'email', 'profile'].join(' ');
+    // Use Chrome Identity API for Google sign-in (simpler and more reliable)
+    // No scopes needed - chrome.identity handles it automatically
+    const token = await chrome.identity.getAuthToken({ interactive: true });
     
-    // Build the OAuth URL
-    const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    authUrl.searchParams.set('client_id', clientId);
-    authUrl.searchParams.set('redirect_uri', redirectUrl);
-    authUrl.searchParams.set('response_type', 'token');
-    authUrl.searchParams.set('scope', scopes);
-    authUrl.searchParams.set('prompt', 'select_account');
+    console.log('Token received:', token ? 'yes' : 'no');
     
-    console.log('Launching auth flow with URL:', authUrl.toString());
+    if (!token) {
+      throw new Error('Failed to get authentication token');
+    }
     
-    // Launch the OAuth flow
-    const responseUrl = await new Promise((resolve, reject) => {
-      chrome.identity.launchWebAuthFlow(
-        {
-          url: authUrl.toString(),
-          interactive: true
-        },
-        (callbackUrl) => {
-          if (chrome.runtime.lastError) {
-            console.error('Auth error:', chrome.runtime.lastError);
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (!callbackUrl) {
-            reject(new Error('Authentication was cancelled'));
-          } else {
-            console.log('Callback URL received');
-            resolve(callbackUrl);
-          }
-        }
-      );
-    });
+    console.log('Got token! Fetching user info...');
     
-    console.log('Auth flow completed, parsing response...');
-    
-    // Extract the access token from the callback URL
+    // Get user info from Google
     const urlHash = responseUrl.split('#')[1];
     if (!urlHash) {
       throw new Error('No token in response');
