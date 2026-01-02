@@ -1251,9 +1251,6 @@ app.get('/admin/tickets', async (req, res) => {
         .stats { display: flex; gap: 20px; margin-bottom: 30px; }
         .stat-card { background: #f8fafc; padding: 20px; border-radius: 8px; flex: 1; }
         .stat-number { font-size: 32px; font-weight: bold; color: #667eea; }
-        .key-info { background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
-        .key-info strong { color: #0369a1; }
-        .key-warning { color: #dc2626; font-size: 12px; margin-top: 5px; }
         .ticket { border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 20px; background: #f8fafc; }
         .ticket-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
         .ticket-id { font-family: monospace; color: #64748b; font-size: 12px; }
