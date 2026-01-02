@@ -7,6 +7,19 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Health check endpoint (add early to ensure it's registered)
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    message: 'Focufy Backend API',
+    endpoints: {
+      adminTickets: '/admin/tickets?key=YOUR_ADMIN_KEY',
+      adminApi: '/api/admin/tickets?key=YOUR_ADMIN_KEY',
+      testServiceAccount: '/api/test-service-account'
+    }
+  });
+});
+
 // CONFIGURATION
 const GOOGLE_CLIENT_ID = '42484888880-r0rgoel8vrhmk5tsdtfibb0jot3vgksd.apps.googleusercontent.com'; // Same as extension
 const GOOGLE_CLOUD_PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID; // Your Google Cloud Project ID
