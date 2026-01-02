@@ -11,6 +11,7 @@ app.use(express.json());
 const GOOGLE_CLIENT_ID = '42484888880-r0rgoel8vrhmk5tsdtfibb0jot3vgksd.apps.googleusercontent.com'; // Same as extension
 const GOOGLE_CLOUD_PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID; // Your Google Cloud Project ID
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY; // Fallback API key (if auto-generation fails)
+const DAILY_LIMIT_PER_USER = 1000; // High limit (effectively unlimited per user)
 
 // Initialize Google Auth for Service Account (REQUIRED for automatic key generation)
 let serviceAccountAuth = null;
