@@ -894,29 +894,14 @@ async function signInWithGoogle() {
     console.error('Google sign-in error:', error);
     let errorMessage = 'Sign-in failed. ';
     
-    if (error.message.includes('redirect_uri_mismatch') || error.message.includes('invalid_request') || error.message.includes('flowName=GeneralOAuthFlow') || error.message.includes('Custom scheme') || error.message.includes('WEB') || error.message.includes('WEB_CLIENT_REQUIRES_SETUP')) {
-      const redirectUrl = chrome.identity ? chrome.identity.getRedirectURL() : 'unknown';
+    if (error.message.includes('invalid_request') || error.message.includes('Custom scheme') || error.message.includes('invalid_client')) {
       const setupUrl = 'https://console.cloud.google.com/apis/credentials';
       
-      errorMessage = `❌ OAuth Client Type Error\n\nYour OAuth client is set as "Web application" which doesn't work automatically with Chrome extensions.\n\n✅ SOLUTION: Create a "Chrome App" OAuth client\n\n📋 Quick Steps:\n1. Go to: ${setupUrl}\n2. Click "+ CREATE CREDENTIALS" → "OAuth client ID"\n3. Application type: Select "Chrome App" (NOT "Web application")\n4. Application ID: Leave blank\n5. Click "Create"\n6. Copy the new Client ID\n7. Update manifest.json → oauth2.client_id with the new ID\n8. Reload extension\n\n📖 See OAUTH_CLIENT_SETUP.md for detailed instructions.\n\n⚠️ Your current client ID: 42484888880-r0rgoel8vrhmk5tsdtfibb0jot3vgksd.apps.googleusercontent.com\n(This is a Web application client - you need a Chrome App client instead)`;
+      errorMessage = `❌ OAuth Configuration Error\n\nPossible issues:\n1. OAuth client is not "Chrome Extension" type\n2. OAuth consent screen not fully configured\n3. Scopes not added to consent screen\n4. Extension ID not added to OAuth client (optional)\n\n✅ SOLUTION:\n1. Go to: ${setupUrl}\n2. Verify your OAuth client type is "Chrome Extension"\n3. Go to OAuth consent screen and ensure it's configured\n4. Add scopes: userinfo.email, userinfo.profile\n5. Add test users if using External type\n6. Wait 5-10 minutes for changes to propagate\n\n📖 See CHROME_EXTENSION_OAUTH_FIX.md for detailed instructions.`;
       
-      console.error('❌ OAuth client type issue. Create a Chrome App OAuth client.');
-      console.error('Current client is Web application type. Need Chrome App type.');
+      console.error('❌ OAuth configuration error:', error.message);
+      console.error('Verify OAuth client is "Chrome Extension" type in Google Cloud Console');
       console.error('Setup URL:', setupUrl);
-      console.error('Redirect URI (for reference):', redirectUrl);
-      
-      // Show a clear alert with instructions
-      const userConfirmed = confirm(
-        `OAuth Setup Required\n\n` +
-        `Your OAuth client is "Web application" type, which doesn't work automatically.\n\n` +
-        `You need to create a "Chrome App" OAuth client.\n\n` +
-        `Click OK to open setup instructions, or Cancel to use Email sign-in instead.`
-      );
-      
-      if (userConfirmed) {
-        // Open the setup guide
-        chrome.tabs.create({ url: chrome.runtime.getURL('OAUTH_CLIENT_SETUP.md') });
-      }
     } else if (error.message.includes('OAuth2') || error.message.includes('invalid_client')) {
       errorMessage += 'OAuth configuration error. Please check the extension\'s OAuth client ID in manifest.json.';
     } else if (error.message.includes('access_denied')) {
