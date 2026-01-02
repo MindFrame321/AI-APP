@@ -1,136 +1,12 @@
 # Security Setup Guide for Focufy Backend
 
-This guide covers setting up Cloudflare protection and implementing security best practices for your Focufy backend.
+This guide covers the security measures implemented in your Focufy backend and how to configure them.
 
 ## Table of Contents
-1. [Cloudflare Setup (Free Tier)](#cloudflare-setup-free-tier)
-2. [Security Improvements](#security-improvements)
-3. [Environment Variables](#environment-variables)
-4. [Testing Security](#testing-security)
-
----
-
-## Cloudflare Setup (Free Tier)
-
-### Step 1: Create Cloudflare Account
-1. Go to **https://dash.cloudflare.com/sign-up**
-2. Enter your email address and create a password
-3. Click "Sign up" (no credit card required for free tier)
-4. Check your email and click the verification link
-5. You'll be redirected to the Cloudflare dashboard
-
-### Step 2: Add Your Render Site to Cloudflare
-
-**Important Note**: Cloudflare typically works with custom domains, not subdomains from hosting providers like Render. However, we can still use Cloudflare's security features. Here are your options:
-
-#### Option A: Using Render's Domain (Simpler - Recommended for Now)
-
-Since `focufy-extension-1.onrender.com` is a Render subdomain, Cloudflare cannot proxy it directly. However, you can still use Cloudflare's security features through their API or wait until you have a custom domain.
-
-**For now, skip Cloudflare setup** and rely on the security improvements we've made in the code. You can add Cloudflare later when you get a custom domain.
-
-#### Option B: Using a Custom Domain (Better Long-term)
-
-If you have a custom domain (e.g., `focufy.com` or `focufy.app`):
-
-1. **In Cloudflare Dashboard:**
-   - Click the **"Add a Site"** button (big blue button at the top)
-   - Enter your custom domain (e.g., `focufy.com`)
-   - Click **"Add site"**
-   - Select the **Free** plan
-   - Click **"Continue"**
-
-2. **Cloudflare will scan your DNS:**
-   - Wait for Cloudflare to scan your existing DNS records
-   - This usually takes 30-60 seconds
-   - You'll see a list of your current DNS records
-
-3. **Configure DNS Records:**
-   - Cloudflare will show your existing DNS records
-   - Make sure the **Proxy status** is **Proxied** (orange cloud ☁️) for your main domain
-   - If you need to add a CNAME for your Render service:
-     - Click **"Add record"**
-     - **Type**: CNAME
-     - **Name**: `api` (or `www` or `@` for root)
-     - **Target**: `focufy-extension-1.onrender.com`
-     - **Proxy status**: Proxied (orange cloud) ☁️
-     - Click **"Save"**
-
-4. **Update Nameservers:**
-   - Cloudflare will show you two nameservers (e.g., `alice.ns.cloudflare.com` and `bob.ns.cloudflare.com`)
-   - **Copy both nameservers**
-   - Go to your domain registrar (where you bought the domain - GoDaddy, Namecheap, etc.)
-   - Find your domain's DNS settings
-   - Replace the existing nameservers with Cloudflare's nameservers
-   - Save the changes
-   - Wait for DNS propagation (5-30 minutes, sometimes up to 48 hours)
-
-5. **Back in Cloudflare:**
-   - Click **"Continue"** after updating nameservers
-   - Cloudflare will verify the nameservers
-   - Once verified, your site will be active on Cloudflare
-
-### Step 3: Point Your Domain to Render
-
-After Cloudflare is set up, you need to point your domain to Render:
-
-1. **In Cloudflare Dashboard:**
-   - Go to **DNS** → **Records**
-   - Add or edit a CNAME record:
-     - **Type**: CNAME
-     - **Name**: `api` (or whatever subdomain you want)
-     - **Target**: `focufy-extension-1.onrender.com`
-     - **Proxy status**: Proxied ☁️
-     - Click **"Save"**
-
-2. **In Render Dashboard:**
-   - Go to your service settings
-   - Add your custom domain
-   - Render will provide instructions for DNS configuration
-   - Use the CNAME record from Cloudflare
-
-### Step 4: Verify Setup
-
-1. Wait 5-30 minutes for DNS to propagate
-2. Test your domain: `https://api.yourdomain.com` (or whatever you configured)
-3. It should load your Render service through Cloudflare
-4. Check that the SSL certificate is active (lock icon in browser)
-
-### Step 5: Enable Security Features (After Domain is Active)
-
-**Note**: These steps only work if you've set up a custom domain. If you're using Render's domain directly, skip to the "Alternative: Security Without Custom Domain" section below.
-
-Once your domain is active on Cloudflare:
-1. Go to **Security** → **WAF** (Web Application Firewall)
-2. Enable **Managed Rules**:
-   - ✅ Cloudflare Managed Ruleset
-   - ✅ OWASP Core Ruleset (free tier includes basic rules)
-3. Go to **Security** → **Rate Limiting**
-4. Create a rate limit rule:
-   - **Rule name**: API Rate Limit
-   - **Match**: URI Path contains `/api/`
-   - **Requests**: 100 per minute per IP
-   - **Action**: Block
-   - Click "Deploy"
-
-### Step 6: SSL/TLS Settings
-1. Go to **SSL/TLS** → **Overview**
-2. Set encryption mode to **Full (strict)**
-3. Enable **Always Use HTTPS**
-4. Enable **Automatic HTTPS Rewrites**
-
-### Step 7: Firewall Rules (Optional but Recommended)
-1. Go to **Security** → **WAF** → **Custom Rules**
-2. Create a rule to block suspicious requests:
-   - **Rule name**: Block SQL Injection Attempts
-   - **Expression**: `(http.request.uri.query contains "union") or (http.request.uri.query contains "select")`
-   - **Action**: Block
-   - Click "Deploy"
-
-### Step 8: Get Your Cloudflare IP Ranges (For Backend Whitelist)
-1. Go to https://www.cloudflare.com/ips/
-2. Note the IPv4 and IPv6 ranges
-3. You can use these to verify requests are coming from Cloudflare (optional)
+1. [Security Improvements](#security-improvements)
+2. [Environment Variables](#environment-variables)
+3. [Testing Security](#testing-security)
+4. [Additional Recommendations](#additional-recommendations)
 
 ---
 
@@ -139,19 +15,23 @@ Once your domain is active on Cloudflare:
 The following security improvements have been implemented in the code:
 
 ### 1. CORS Restrictions
-- CORS is now restricted to your extension's origin
+- CORS is now restricted to Chrome extension origins
 - Only requests from Chrome extensions are allowed
 - Prevents unauthorized websites from calling your API
 
 ### 2. Admin Key Security
 - Removed default admin key from code
 - Admin key must be set via `ADMIN_KEY` environment variable
-- No fallback default value
+- No fallback default value - server will error if not configured
 
 ### 3. Input Validation
 - Added validation for all user inputs
 - Sanitizes ticket messages and responses
 - Prevents injection attacks
+- Maximum length limits:
+  - Subject: 200 characters
+  - Messages: 5,000 characters
+  - Chat messages: 1,000 characters
 
 ### 4. Request Size Limits
 - Added body size limit (1MB) to prevent large payload attacks
@@ -160,6 +40,11 @@ The following security improvements have been implemented in the code:
 ### 5. Health Check Security
 - Removed sensitive endpoint information from health check
 - Only shows basic status
+
+### 6. Built-in Protection
+- Render provides DDoS protection automatically
+- SSL/HTTPS is enabled by default
+- Your service is behind Render's infrastructure
 
 ---
 
@@ -192,6 +77,8 @@ node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
 
 Or use an online generator: https://randomkeygen.com/
 
+**Important**: Set `ADMIN_KEY` in Render dashboard. The server will not work without it.
+
 ---
 
 ## Testing Security
@@ -218,26 +105,18 @@ curl -X POST https://focufy-extension-1.onrender.com/api/support/tickets \
   -d '{"subject":"test","message":"test"}'
 ```
 
----
-
-## Cloudflare Dashboard Monitoring
-
-### Key Metrics to Monitor:
-1. **Security** → **Events**: View blocked requests
-2. **Analytics** → **Web Traffic**: Monitor traffic patterns
-3. **Security** → **WAF**: Check firewall rule triggers
-4. **Security** → **Rate Limiting**: Monitor rate limit hits
-
-### Alerts Setup:
-1. Go to **Notifications**
-2. Set up email alerts for:
-   - High number of blocked requests
-   - DDoS attacks detected
-   - Rate limit violations
+### Test 4: Input Validation
+```bash
+# This should fail (message too long)
+curl -X POST https://focufy-extension-1.onrender.com/api/support/tickets \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"subject":"test","message":"'$(python3 -c "print('x'*6000)")'"}'
+```
 
 ---
 
-## Additional Security Recommendations
+## Additional Recommendations
 
 ### 1. Regular Updates
 - Keep dependencies updated: `npm audit` and `npm update`
@@ -261,15 +140,14 @@ curl -X POST https://focufy-extension-1.onrender.com/api/support/tickets \
 - Monitor error rates
 - Set up alerts for unusual activity
 
+### 6. Rate Limiting
+- Your code already includes rate limiting via `authMiddleware`
+- Monitor usage patterns in Render logs
+- Adjust limits if needed
+
 ---
 
 ## Troubleshooting
-
-### Issue: Cloudflare blocking legitimate requests
-**Solution**: 
-1. Go to Cloudflare Dashboard → Security → WAF
-2. Check "Recent Events" to see what's being blocked
-3. Create an exception rule if needed
 
 ### Issue: CORS errors in extension
 **Solution**: 
@@ -283,12 +161,17 @@ curl -X POST https://focufy-extension-1.onrender.com/api/support/tickets \
 2. Check that you're using the correct key in URL
 3. Verify key matches exactly (no extra spaces)
 
+### Issue: "ADMIN_KEY not configured" error
+**Solution**:
+1. Go to Render dashboard → Environment Variables
+2. Add `ADMIN_KEY` with a secure random value
+3. Redeploy your service
+
 ---
 
 ## Cost Summary
 
-### Free Tier (What You're Using):
-- ✅ Cloudflare: $0/month
+### Current Setup (Free Tier):
 - ✅ Render: $0/month (free tier)
 - ✅ MongoDB Atlas: $0/month (free tier M0)
 - ✅ Total: **$0/month**
@@ -296,20 +179,19 @@ curl -X POST https://focufy-extension-1.onrender.com/api/support/tickets \
 ### If You Scale Up:
 - Render: $7/month (Starter) for better performance
 - MongoDB Atlas: Free tier is usually enough
-- Cloudflare: Still free for most use cases
+- Optional: Custom domain ($10-15/year) if you want a branded URL
 
 ---
 
 ## Support
 
 If you encounter issues:
-1. Check Cloudflare dashboard for blocked requests
-2. Check Render logs for backend errors
-3. Review this guide for common issues
+1. Check Render logs for backend errors
+2. Review this guide for common issues
+3. Verify all environment variables are set correctly
 4. Contact support if needed
 
 ---
 
 **Last Updated**: 2024
 **Version**: 1.0
-
