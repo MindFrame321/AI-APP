@@ -59,9 +59,15 @@ async function generateUserApiKeyWithServiceAccount(userId, userEmail) {
     }
     
     console.log(`🔄 Creating API key for user ${userId} using Service Account...`);
+    console.log(`📋 Project ID: ${GOOGLE_CLOUD_PROJECT_ID}`);
     
     // Get Service Account client
     const authClient = await serviceAccountAuth.getClient();
+    
+    // Verify we have a client
+    if (!authClient) {
+      throw new Error('Failed to get Service Account client');
+    }
     
     // Get access token (handle both string and object responses)
     const tokenResponse = await authClient.getAccessToken();
@@ -71,7 +77,36 @@ async function generateUserApiKeyWithServiceAccount(userId, userEmail) {
       throw new Error('Failed to get Service Account access token');
     }
     
-    console.log('Service Account token obtained');
+    console.log('✅ Service Account token obtained (length:', token.length, ')');
+    
+    // Test token by making a simple API call to verify permissions
+    console.log('🔍 Testing Service Account permissions...');
+    const testResponse = await fetch(
+      `https://apikeys.googleapis.com/v2/projects/${GOOGLE_CLOUD_PROJECT_ID}/locations/global/keys`,
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+    
+    if (testResponse.status === 401 || testResponse.status === 403) {
+      const testError = await testResponse.text();
+      console.error('❌ Permission test failed:', testResponse.status, testError);
+      throw new Error(`Service Account lacks permissions. Steps to fix:
+1. Go to: https://console.cloud.google.com/iam-admin/iam?project=${GOOGLE_CLOUD_PROJECT_ID}
+2. Find your Service Account (the email from SERVICE_ACCOUNT_KEY)
+3. Click the pencil icon (Edit)
+4. Click "Add Another Role"
+5. Search for: "API Keys Admin"
+6. Select: API Keys Admin (roles/serviceusage.apiKeysAdmin)
+7. Click "Save"
+8. Wait 1-2 minutes for changes to propagate
+9. Also enable "API Keys API" at: https://console.cloud.google.com/apis/library/apikeys.googleapis.com?project=${GOOGLE_CLOUD_PROJECT_ID}`);
+    }
+    
+    console.log('✅ Service Account permissions verified');
     
     // Create API key via Google Cloud API Key Management API
     // This creates a REAL, unique API key for each user in YOUR Google Cloud project
@@ -205,6 +240,82 @@ async function authMiddleware(req, res, next) {
   req.user = user;
   next();
 }
+
+// Test endpoint to verify Service Account setup (no auth required for debugging)
+app.get('/api/test-service-account', async (req, res) => {
+  try {
+    if (!serviceAccountAuth) {
+      return res.status(500).json({ 
+        error: 'Service Account not configured',
+        fix: 'Set GOOGLE_APPLICATION_CREDENTIALS or SERVICE_ACCOUNT_KEY environment variable'
+      });
+    }
+    
+    if (!GOOGLE_CLOUD_PROJECT_ID) {
+      return res.status(500).json({ 
+        error: 'GOOGLE_CLOUD_PROJECT_ID not set',
+        fix: 'Set GOOGLE_CLOUD_PROJECT_ID environment variable'
+      });
+    }
+    
+    const authClient = await serviceAccountAuth.getClient();
+    const tokenResponse = await authClient.getAccessToken();
+    const token = typeof tokenResponse === 'string' ? tokenResponse : (tokenResponse?.token || tokenResponse);
+    
+    if (!token) {
+      return res.status(500).json({ 
+        error: 'Failed to get access token',
+        fix: 'Check Service Account JSON credentials'
+      });
+    }
+    
+    // Test API Keys API access
+    const testResponse = await fetch(
+      `https://apikeys.googleapis.com/v2/projects/${GOOGLE_CLOUD_PROJECT_ID}/locations/global/keys`,
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+    
+    if (testResponse.status === 401 || testResponse.status === 403) {
+      const errorText = await testResponse.text();
+      return res.status(testResponse.status).json({
+        error: 'Service Account lacks permissions',
+        status: testResponse.status,
+        details: errorText,
+        fix: `1. Go to: https://console.cloud.google.com/iam-admin/iam?project=${GOOGLE_CLOUD_PROJECT_ID}
+2. Find your Service Account
+3. Click Edit → Add Role → "API Keys Admin"
+4. Enable API Keys API: https://console.cloud.google.com/apis/library/apikeys.googleapis.com?project=${GOOGLE_CLOUD_PROJECT_ID}`
+      });
+    }
+    
+    if (!testResponse.ok) {
+      const errorText = await testResponse.text();
+      return res.status(testResponse.status).json({
+        error: 'API test failed',
+        status: testResponse.status,
+        details: errorText
+      });
+    }
+    
+    return res.json({
+      success: true,
+      message: 'Service Account is properly configured',
+      projectId: GOOGLE_CLOUD_PROJECT_ID,
+      tokenLength: token.length
+    });
+    
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Test failed',
+      message: error.message
+    });
+  }
+});
 
 // Auto-generate API key using user's Google account (called when user gives consent)
 app.post('/api/generate-api-key', authMiddleware, async (req, res) => {
