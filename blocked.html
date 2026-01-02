@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Page Blocked - Focufy</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      text-align: center;
+      padding: 20px;
+      margin: 0;
+    }
+    .container {
+      max-width: 600px;
+    }
+    h1 { font-size: 32px; margin-bottom: 16px; }
+    p { font-size: 18px; opacity: 0.9; margin-bottom: 24px; }
+    .button {
+      display: inline-block;
+      padding: 12px 24px;
+      background: white;
+      color: #667eea;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      margin: 8px;
+    }
+    .button:hover {
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚫 Page Blocked</h1>
+    <p id="message">This page is blocked during your focus session.</p>
+    <div>
+      <a href="#" onclick="window.history.back(); return false;" class="button">Go Back</a>
+      <a href="#" onclick="chrome.runtime.sendMessage({action: 'endSession'}, () => window.location.reload()); return false;" class="button">End Session</a>
+    </div>
+  </div>
+  <script>
+    // Get reason from URL params
+    const urlParams = new URLSearchParams(window.location.search);
+    const reason = urlParams.get('reason');
+    const task = urlParams.get('task');
+    const time = urlParams.get('time');
+    
+    const messageEl = document.getElementById('message');
+    
+    if (reason === 'always-blocked') {
+      messageEl.textContent = 'This domain is on your always-block list.';
+    } else if (reason === 'extensions-page-blocked') {
+      messageEl.textContent = 'Chrome extensions page is blocked during focus sessions to prevent tampering.';
+    } else if (reason === 'settings-blocked') {
+      messageEl.textContent = 'Settings access is restricted during active focus sessions.';
+    } else if (task) {
+      messageEl.textContent = `This page is not relevant to your focus task: "${task}"`;
+    } else {
+      messageEl.textContent = 'This page is blocked during your focus session.';
+    }
+    
+    if (time) {
+      const timeEl = document.createElement('p');
+      timeEl.textContent = `Time remaining: ${time} minutes`;
+      timeEl.style.fontSize = '16px';
+      timeEl.style.opacity = '0.8';
+      messageEl.parentNode.insertBefore(timeEl, messageEl.nextSibling);
+    }
+  </script>
+</body>
+</html>

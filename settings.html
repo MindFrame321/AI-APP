@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Focufy Settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-content">
+        <div class="logo">
+          <svg width="40" height="40" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="64" cy="64" r="60" fill="url(#gradient)"/>
+            <circle cx="64" cy="64" r="45" stroke="white" stroke-width="3" fill="none" opacity="0.3"/>
+            <circle cx="64" cy="64" r="30" stroke="white" stroke-width="3" fill="none" opacity="0.5"/>
+            <circle cx="64" cy="64" r="15" fill="white"/>
+            <path d="M 45 35 L 45 75 L 55 75 L 55 55 L 70 55 L 70 45 L 55 45 L 55 35 Z" fill="white" opacity="0.9"/>
+            <defs>
+              <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <h1>Focufy Settings</h1>
+        <p class="header-subtitle">Configure your focus experience</p>
+      </div>
+    </header>
+
+    <div id="sessionWarning" class="warning hidden">
+      <strong>⚠️ Active Focus Session</strong>
+      <p>Settings are blocked during active focus sessions. Please end your session first.</p>
+      <button id="endSessionBtn" class="btn btn-danger">End Session</button>
+    </div>
+
+    <div id="settingsContent">
+      <!-- API Configuration -->
+      <section class="settings-section">
+        <h2>API Configuration</h2>
+        <div id="userApiKeyStatus" class="api-key-status hidden">
+          <p class="status-text"></p>
+        </div>
+        <div class="form-group">
+          <label for="backendUrl">Backend Proxy URL <span style="color: #ef4444;">*Required</span></label>
+          <input type="text" id="backendUrl" placeholder="https://your-backend.onrender.com">
+          <p class="help-text">
+            <strong>What is this?</strong> This is the URL of your backend server that generates API keys automatically.
+            <br><br>
+            <strong>Quick Setup:</strong>
+            <ol style="margin: 8px 0; padding-left: 20px;">
+              <li>Deploy the backend from <code>backend-example/</code> folder to Render/Railway/Heroku</li>
+              <li>Copy the URL (e.g., <code>https://focufy-backend.onrender.com</code>)</li>
+              <li>Paste it here and click "Save Settings"</li>
+              <li>Click "Generate Now" button below to create your API key</li>
+            </ol>
+            <strong>See <code>SETUP_GUIDE.md</code> for detailed instructions.</strong>
+          </p>
+        </div>
+        <div class="form-group">
+          <label for="apiKey">Direct API Key (Optional - Only if not using backend)</label>
+          <input type="password" id="apiKey" placeholder="AIza... (Leave empty if using backend)">
+          <p class="help-text">Only needed if you're NOT using a backend proxy. Get it from: <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a></p>
+        </div>
+        <div class="form-group">
+          <label for="apiUrl">API URL (Optional)</label>
+          <input type="text" id="apiUrl" placeholder="https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent">
+          <p class="help-text">Default: Gemini Pro API endpoint</p>
+        </div>
+      </section>
+
+      <!-- Always Allow List -->
+      <section class="settings-section">
+        <h2>Always Allow</h2>
+        <p class="section-description">Domains where no elements are blocked</p>
+        <div class="list-container">
+          <div class="input-group">
+            <input type="text" id="alwaysAllowInput" placeholder="example.com">
+            <button id="addAlwaysAllowBtn" class="btn btn-small">Add</button>
+          </div>
+          <ul id="alwaysAllowList" class="domain-list"></ul>
+        </div>
+      </section>
+
+      <!-- Always Block List -->
+      <section class="settings-section">
+        <h2>Always Block</h2>
+        <p class="section-description">Domains where the entire page is blocked</p>
+        <div class="list-container">
+          <div class="input-group">
+            <input type="text" id="alwaysBlockInput" placeholder="example.com">
+            <button id="addAlwaysBlockBtn" class="btn btn-small">Add</button>
+          </div>
+          <ul id="alwaysBlockList" class="domain-list"></ul>
+        </div>
+      </section>
+
+      <!-- Auto-Navigation Features -->
+      <section class="settings-section">
+        <h2>Smart Navigation</h2>
+        <p class="section-description">Automatically navigate to relevant content on search engines</p>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="autoNavigateEnabled">
+            <span>Enable Auto-Navigation</span>
+          </label>
+          <p class="help-text">When enabled, visiting search engines (YouTube, Reddit, Wikipedia, Google) will automatically search for content related to your study goal.</p>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="learningModeEnabled">
+            <span>Enable Learning Mode</span>
+          </label>
+          <p class="help-text">Tracks your browsing patterns and adapts to your focus. If you dive deep into a subtopic, it will learn and suggest related content.</p>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button id="saveBtn" class="btn btn-primary">Save Settings</button>
+        <button id="resetBtn" class="btn btn-secondary">Reset to Defaults</button>
+      </div>
+
+      <div id="statusMessage" class="status-message hidden"></div>
+    </div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

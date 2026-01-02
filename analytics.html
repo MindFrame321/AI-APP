@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analytics - Focufy</title>
+  <link rel="stylesheet" href="analytics.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-content">
+        <div class="logo">
+          <svg width="40" height="40" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="64" cy="64" r="60" fill="url(#gradient)"/>
+            <circle cx="64" cy="64" r="45" stroke="white" stroke-width="3" fill="none" opacity="0.3"/>
+            <circle cx="64" cy="64" r="30" stroke="white" stroke-width="3" fill="none" opacity="0.5"/>
+            <circle cx="64" cy="64" r="15" fill="white"/>
+            <path d="M 45 35 L 45 75 L 55 75 L 55 55 L 70 55 L 70 45 L 55 45 L 55 35 Z" fill="white" opacity="0.9"/>
+            <defs>
+              <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <h1>Focufy Analytics</h1>
+        <p class="header-subtitle">Track your focus and productivity</p>
+      </div>
+    </header>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon">⏱️</div>
+        <div class="stat-content">
+          <div class="stat-label">Total Focus Time</div>
+          <div class="stat-value" id="totalFocusTime">0h 0m</div>
+          <div class="stat-change">This week</div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon">🚫</div>
+        <div class="stat-content">
+          <div class="stat-label">Distractions Blocked</div>
+          <div class="stat-value" id="distractionsBlocked">0</div>
+          <div class="stat-change">All time</div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon">🔥</div>
+        <div class="stat-content">
+          <div class="stat-label">Focus Streak</div>
+          <div class="stat-value" id="focusStreak">0 days</div>
+          <div class="stat-change">Current streak</div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon">⭐</div>
+        <div class="stat-content">
+          <div class="stat-label">Productivity Score</div>
+          <div class="stat-value" id="productivityScore">0</div>
+          <div class="stat-change">Out of 100</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="charts-section">
+      <div class="chart-card">
+        <h2>Focus Time Over Time</h2>
+        <canvas id="focusTimeChart"></canvas>
+      </div>
+
+      <div class="chart-card">
+        <h2>Most Blocked Websites</h2>
+        <canvas id="blockedSitesChart"></canvas>
+      </div>
+    </div>
+
+    <div class="session-history">
+      <h2>Recent Sessions</h2>
+      <div id="sessionList" class="session-list"></div>
+    </div>
+
+    <div class="actions">
+      <button id="exportBtn" class="btn btn-primary">Export Data (CSV)</button>
+      <button id="backBtn" class="btn btn-secondary">Back to Extension</button>
+    </div>
+  </div>
+
+  <script src="analytics.js"></script>
+</body>
+</html>
+

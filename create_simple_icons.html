@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head><title>Create Icons</title></head>
+<body>
+<canvas id="canvas16" width="16" height="16"></canvas>
+<canvas id="canvas48" width="48" height="48"></canvas>
+<canvas id="canvas128" width="128" height="128"></canvas>
+<script>
+function createIcon(size, filename) {
+  const canvas = document.getElementById(`canvas${size}`);
+  const ctx = canvas.getContext('2d');
+  
+  // Gradient background
+  const gradient = ctx.createLinearGradient(0, 0, size, size);
+  gradient.addColorStop(0, '#667eea');
+  gradient.addColorStop(1, '#764ba2');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  
+  // White circle
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.beginPath();
+  ctx.arc(size/2, size/2, size/3, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Download
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+  });
+}
+
+createIcon(16, 'icon16.png');
+createIcon(48, 'icon48.png');
+createIcon(128, 'icon128.png');
+</script>
+</body>
+</html>

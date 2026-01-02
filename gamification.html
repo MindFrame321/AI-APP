@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Achievements - Focufy</title>
+  <link rel="stylesheet" href="gamification.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-content">
+        <div class="logo">
+          <svg width="40" height="40" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="64" cy="64" r="60" fill="url(#gradient)"/>
+            <circle cx="64" cy="64" r="45" stroke="white" stroke-width="3" fill="none" opacity="0.3"/>
+            <circle cx="64" cy="64" r="30" stroke="white" stroke-width="3" fill="none" opacity="0.5"/>
+            <circle cx="64" cy="64" r="15" fill="white"/>
+            <path d="M 45 35 L 45 75 L 55 75 L 55 55 L 70 55 L 70 45 L 55 45 L 55 35 Z" fill="white" opacity="0.9"/>
+            <defs>
+              <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <h1>Focufy Achievements</h1>
+        <p class="header-subtitle">Level up your focus</p>
+      </div>
+    </header>
+
+    <div class="content">
+      <!-- Level Display -->
+      <div class="level-section">
+        <div class="level-badge" id="levelBadge">Level 1</div>
+        <div class="level-name" id="levelName">Beginner</div>
+        <div class="level-progress">
+          <div class="progress-bar">
+            <div class="progress-fill" id="levelProgress"></div>
+          </div>
+          <div class="progress-text">
+            <span id="currentPoints">0</span> / <span id="nextLevelPoints">100</span> points to next level
+          </div>
+        </div>
+        <div class="level-stats">
+          <div class="stat">
+            <div class="stat-value" id="totalPoints">0</div>
+            <div class="stat-label">Total Points</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="totalAchievements">0</div>
+            <div class="stat-label">Achievements</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="currentStreak">0</div>
+            <div class="stat-label">Day Streak</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Daily Challenge -->
+      <div class="challenge-section">
+        <h2>📅 Today's Challenge</h2>
+        <div id="dailyChallenge" class="challenge-card">
+          <div class="challenge-header">
+            <div class="challenge-icon" id="challengeIcon">🎯</div>
+            <div class="challenge-info">
+              <div class="challenge-name" id="challengeName">Loading...</div>
+              <div class="challenge-description" id="challengeDesc"></div>
+            </div>
+          </div>
+          <div class="challenge-progress">
+            <div class="progress-bar">
+              <div class="progress-fill" id="challengeProgress"></div>
+            </div>
+            <div class="progress-text" id="challengeProgressText">0 / 0</div>
+          </div>
+          <div class="challenge-reward">
+            <span class="reward-icon">⭐</span>
+            <span id="challengePoints">0</span> points reward
+          </div>
+        </div>
+      </div>
+
+      <!-- Achievements Grid -->
+      <div class="achievements-section">
+        <h2>🏆 All Achievements</h2>
+        <div id="achievementsGrid" class="achievements-grid"></div>
+      </div>
+
+      <!-- Recent Achievements -->
+      <div class="recent-section">
+        <h2>✨ Recent Unlocks</h2>
+        <div id="recentAchievements" class="recent-list"></div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="window.close()">Close</button>
+    </div>
+  </div>
+
+  <script src="gamification-page.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Help & Support - Focufy</title>
+  <link rel="stylesheet" href="help.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-content">
+        <div class="logo">
+          <svg width="40" height="40" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="64" cy="64" r="60" fill="url(#gradient)"/>
+            <circle cx="64" cy="64" r="45" stroke="white" stroke-width="3" fill="none" opacity="0.3"/>
+            <circle cx="64" cy="64" r="30" stroke="white" stroke-width="3" fill="none" opacity="0.5"/>
+            <circle cx="64" cy="64" r="15" fill="white"/>
+            <path d="M 45 35 L 45 75 L 55 75 L 55 55 L 70 55 L 70 45 L 55 45 L 55 35 Z" fill="white" opacity="0.9"/>
+            <defs>
+              <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <h1>Help & Support</h1>
+        <p class="header-subtitle">Get help with Focufy</p>
+      </div>
+    </header>
+
+    <div class="help-content">
+      <!-- AI Chat Bot -->
+      <div class="chat-section">
+        <h2>💬 Ask Focufy AI Assistant</h2>
+        <div class="chat-container">
+          <div id="chatMessages" class="chat-messages"></div>
+          <div class="chat-input-container">
+            <input type="text" id="chatInput" placeholder="Ask a question..." class="chat-input">
+            <button id="sendBtn" class="btn-send">Send</button>
+          </div>
+        </div>
+        <p class="chat-note">Can't find an answer? Questions are forwarded to prithivponns@gmail.com</p>
+      </div>
+
+      <!-- FAQ Section -->
+      <div class="faq-section">
+        <h2>Frequently Asked Questions</h2>
+        <div class="faq-list">
+          <div class="faq-item">
+            <div class="faq-question">How does Focufy work?</div>
+            <div class="faq-answer">Focufy uses AI to analyze web pages and block distracting elements while keeping content relevant to your study goal visible. Just enter your goal and start a focus session!</div>
+          </div>
+
+          <div class="faq-item">
+            <div class="faq-question">Is there a free trial?</div>
+            <div class="faq-answer">Yes! You get a 7-day free trial with full premium features. No credit card required.</div>
+          </div>
+
+          <div class="faq-item">
+            <div class="faq-question">How does YouTube blocking work?</div>
+            <div class="faq-answer">Focufy analyzes video titles and descriptions to show only videos related to your study goal. Unrelated videos are automatically hidden.</div>
+          </div>
+
+          <div class="faq-item">
+            <div class="faq-question">Can I use Focufy on multiple devices?</div>
+            <div class="faq-answer">Currently, Focufy works on Chrome. Cloud sync across devices is coming soon for Premium users.</div>
+          </div>
+
+          <div class="faq-item">
+            <div class="faq-question">What's the difference between Free and Premium?</div>
+            <div class="faq-answer">Free: 3 sessions/day, basic blocking. Premium: Unlimited sessions, advanced AI, full analytics, cloud sync, and more.</div>
+          </div>
+
+          <div class="faq-item">
+            <div class="faq-question">How do I contact support?</div>
+            <div class="faq-answer">Use the AI assistant above, or email prithivponns@gmail.com. We typically respond within 24 hours.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Links -->
+      <div class="quick-links">
+        <h2>Quick Links</h2>
+        <div class="links-grid">
+          <a href="analytics.html" class="link-card">
+            <span class="link-icon">📊</span>
+            <span>View Analytics</span>
+          </a>
+          <a href="settings.html" class="link-card">
+            <span class="link-icon">⚙️</span>
+            <span>Settings</span>
+          </a>
+          <a href="#" id="emailSupport" class="link-card">
+            <span class="link-icon">📧</span>
+            <span>Email Support</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="help.js"></script>
+</body>
+</html>
+
