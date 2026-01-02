@@ -60,16 +60,12 @@ async function generateUserApiKeyWithServiceAccount(userId, userEmail) {
     
     console.log(`🔄 Creating API key for user ${userId} using Service Account...`);
     
-    // Get Service Account client and request access token
+    // Get Service Account client
     const authClient = await serviceAccountAuth.getClient();
     
-    // Request access token with explicit scopes
-    await authClient.request({
-      url: 'https://www.googleapis.com/auth/cloud-platform'
-    });
-    
+    // Get access token (handle both string and object responses)
     const tokenResponse = await authClient.getAccessToken();
-    const token = tokenResponse.token || tokenResponse;
+    const token = typeof tokenResponse === 'string' ? tokenResponse : (tokenResponse?.token || tokenResponse);
     
     if (!token) {
       throw new Error('Failed to get Service Account access token');
