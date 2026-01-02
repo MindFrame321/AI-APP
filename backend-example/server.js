@@ -860,6 +860,43 @@ app.post('/api/support/tickets/:ticketId/reply', authMiddleware, async (req, res
   }
 });
 
+// Admin endpoint to close a ticket (without response)
+app.post('/api/admin/tickets/:ticketId/close', async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const adminKey = req.query.key || req.headers['x-admin-key'];
+    const expectedKey = process.env.ADMIN_KEY || 'focufy-admin-2024';
+    
+    if (adminKey !== expectedKey) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const ticket = await getTicket(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    // Update status to closed
+    ticket.status = 'closed';
+    ticket.updatedAt = new Date().toISOString();
+    await setTicket(ticket);
+
+    console.log(`✅ Ticket ${ticketId} closed by admin`);
+
+    res.json({
+      success: true,
+      message: 'Ticket closed successfully',
+      ticket: {
+        ticketId: ticket.ticketId,
+        status: ticket.status
+      }
+    });
+  } catch (error) {
+    console.error('Close ticket error:', error);
+    res.status(500).json({ error: 'Failed to close ticket' });
+  }
+});
+
 // Admin endpoint to add response to a ticket
 app.post('/api/admin/tickets/:ticketId/respond', async (req, res) => {
   try {
@@ -1167,6 +1204,17 @@ app.get('/admin/tickets', async (req, res) => {
               </div>
             ` : ''}
             
+            ${ticket.status !== 'closed' ? `
+              <div class="ticket-actions-section">
+                <button onclick="closeTicket('${ticket.ticketId}')" class="close-ticket-btn">🔒 Close Ticket</button>
+                <div id="close-status-${ticket.ticketId}" class="close-status"></div>
+              </div>
+            ` : `
+              <div class="ticket-closed-badge">
+                <strong>✅ This ticket is closed</strong>
+              </div>
+            `}
+            
             <div class="response-form">
               <h3>Add Response</h3>
               <textarea id="response-${ticket.ticketId}" class="response-textarea" placeholder="Type your response here..." rows="4"></textarea>
@@ -1186,6 +1234,40 @@ app.get('/admin/tickets', async (req, res) => {
       
       <script>
         const adminKey = new URLSearchParams(window.location.search).get('key');
+        
+        async function closeTicket(ticketId) {
+          if (!confirm('Are you sure you want to close this ticket? This action cannot be undone.')) {
+            return;
+          }
+          
+          const statusDiv = document.getElementById('close-status-' + ticketId);
+          statusDiv.className = 'close-status';
+          statusDiv.textContent = 'Closing...';
+          
+          try {
+            const response = await fetch(\`/api/admin/tickets/\${encodeURIComponent(ticketId)}/close?key=\${encodeURIComponent(adminKey)}\`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+              statusDiv.className = 'close-status success';
+              statusDiv.textContent = '✅ Ticket closed successfully!';
+              setTimeout(() => {
+                location.reload();
+              }, 1000);
+            } else {
+              throw new Error(data.error || 'Failed to close ticket');
+            }
+          } catch (error) {
+            statusDiv.className = 'close-status error';
+            statusDiv.textContent = '❌ Error: ' + error.message;
+          }
+        }
         
         async function submitResponse(ticketId) {
           const responseText = document.getElementById('response-' + ticketId).value.trim();
