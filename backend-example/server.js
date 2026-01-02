@@ -1292,6 +1292,12 @@ app.get('/admin/tickets', async (req, res) => {
         <h1>📋 Focufy Support Tickets</h1>
         <button class="refresh-btn" onclick="location.reload()">🔄 Refresh</button>
         
+        <div class="key-info">
+          <strong>🔑 Current Admin Key:</strong> <code>${currentKey}</code><br>
+          <span style="font-size: 12px; color: #64748b;">Key expires in ${minutesUntilRotation} minute(s) (rotates every 10 minutes)</span>
+          <div class="key-warning">⚠️ This key will change automatically. Bookmark this page or use /admin/get-key endpoint.</div>
+        </div>
+        
         <div class="stats">
           <div class="stat-card">
             <div class="stat-number">${allTickets.length}</div>
