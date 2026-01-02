@@ -836,8 +836,138 @@ Keep responses under 200 words. Be friendly and helpful.`;
   }
 });
 
+// Admin endpoint to view all tickets (for support team)
+// In production, add proper authentication/authorization
+app.get('/api/admin/tickets', async (req, res) => {
+  try {
+    // Simple admin key check (in production, use proper auth)
+    const adminKey = req.query.key || req.headers['x-admin-key'];
+    const expectedKey = process.env.ADMIN_KEY || 'focufy-admin-2024'; // Change this!
+    
+    if (adminKey !== expectedKey) {
+      return res.status(401).json({ 
+        error: 'Unauthorized. Provide ?key=YOUR_ADMIN_KEY or X-Admin-Key header' 
+      });
+    }
+
+    const allTickets = Array.from(supportTickets.values())
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .map(ticket => ({
+        ticketId: ticket.ticketId,
+        userEmail: ticket.userEmail,
+        userId: ticket.userId,
+        subject: ticket.subject,
+        category: ticket.category,
+        message: ticket.message,
+        status: ticket.status,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+        hasResponse: ticket.responses.length > 0
+      }));
+
+    res.json({
+      success: true,
+      count: allTickets.length,
+      tickets: allTickets
+    });
+  } catch (error) {
+    console.error('Admin tickets error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Simple HTML page to view tickets (admin dashboard)
+app.get('/admin/tickets', async (req, res) => {
+  const adminKey = req.query.key;
+  const expectedKey = process.env.ADMIN_KEY || 'focufy-admin-2024';
+  
+  if (adminKey !== expectedKey) {
+    return res.status(401).send(`
+      <html>
+        <head><title>Focufy Admin - Unauthorized</title></head>
+        <body style="font-family: Arial; padding: 40px; text-align: center;">
+          <h1>🔒 Unauthorized</h1>
+          <p>Please provide the admin key: <code>?key=YOUR_ADMIN_KEY</code></p>
+          <p>Or set ADMIN_KEY environment variable and use that value.</p>
+        </body>
+      </html>
+    `);
+  }
+
+  const allTickets = Array.from(supportTickets.values())
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Focufy Support Tickets</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        h1 { color: #667eea; }
+        .stats { display: flex; gap: 20px; margin-bottom: 30px; }
+        .stat-card { background: #f8fafc; padding: 20px; border-radius: 8px; flex: 1; }
+        .stat-number { font-size: 32px; font-weight: bold; color: #667eea; }
+        .ticket { border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 20px; background: #f8fafc; }
+        .ticket-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .ticket-id { font-family: monospace; color: #64748b; font-size: 12px; }
+        .ticket-status { padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+        .status-open { background: #dbeafe; color: #1e40af; }
+        .ticket-subject { font-size: 18px; font-weight: 600; color: #1e293b; margin: 10px 0; }
+        .ticket-meta { display: flex; gap: 15px; font-size: 12px; color: #64748b; margin-bottom: 15px; }
+        .ticket-message { background: white; padding: 15px; border-radius: 6px; border-left: 3px solid #667eea; margin-top: 10px; white-space: pre-wrap; }
+        .refresh-btn { background: #667eea; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; margin-bottom: 20px; }
+        .refresh-btn:hover { background: #5568d3; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>📋 Focufy Support Tickets</h1>
+        <button class="refresh-btn" onclick="location.reload()">🔄 Refresh</button>
+        
+        <div class="stats">
+          <div class="stat-card">
+            <div class="stat-number">${allTickets.length}</div>
+            <div>Total Tickets</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number">${allTickets.filter(t => t.status === 'open').length}</div>
+            <div>Open Tickets</div>
+          </div>
+        </div>
+
+        ${allTickets.length === 0 ? '<p>No tickets yet.</p>' : ''}
+        
+        ${allTickets.map(ticket => `
+          <div class="ticket">
+            <div class="ticket-header">
+              <div>
+                <div class="ticket-id">${ticket.ticketId}</div>
+                <div class="ticket-subject">${ticket.subject}</div>
+              </div>
+              <span class="ticket-status status-${ticket.status}">${ticket.status.toUpperCase()}</span>
+            </div>
+            <div class="ticket-meta">
+              <span><strong>Email:</strong> ${ticket.userEmail}</span>
+              <span><strong>Category:</strong> ${ticket.category}</span>
+              <span><strong>Created:</strong> ${new Date(ticket.createdAt).toLocaleString()}</span>
+            </div>
+            <div class="ticket-message">${ticket.message}</div>
+          </div>
+        `).join('')}
+      </div>
+    </body>
+    </html>
+  `;
+
+  res.send(html);
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Backend proxy running on port ${PORT}`);
+  console.log(`📋 Admin tickets page: http://localhost:${PORT}/admin/tickets?key=focufy-admin-2024`);
+  console.log(`📋 Admin API: http://localhost:${PORT}/api/admin/tickets?key=focufy-admin-2024`);
 });
 
