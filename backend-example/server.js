@@ -100,6 +100,7 @@ let ticketCounter = 1;
 let useMongoDB = false;
 
 // Helper functions for ticket operations (MongoDB or in-memory)
+// These functions handle both MongoDB and in-memory storage
 async function getTicket(ticketId) {
   if (useMongoDB && ticketsCollection) {
     return await ticketsCollection.findOne({ ticketId });
