@@ -37,7 +37,12 @@ app.get('/', (req, res) => {
     status: 'ok', 
     message: 'Focufy Backend API',
     version: '1.0.0',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: '/',
+      getKey: '/admin/get-key?masterKey=YOUR_MASTER_KEY',
+      adminTickets: '/admin/tickets?key=YOUR_KEY'
+    }
   });
 });
 
