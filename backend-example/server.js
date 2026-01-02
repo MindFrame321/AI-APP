@@ -945,9 +945,16 @@ app.post('/api/admin/tickets/:ticketId/close', async (req, res) => {
   try {
     const { ticketId } = req.params;
     const adminKey = req.query.key || req.headers['x-admin-key'];
-    const expectedKey = process.env.ADMIN_KEY || 'focufy-admin-2024';
+    const expectedKey = process.env.ADMIN_KEY;
     
-    if (adminKey !== expectedKey) {
+    if (!expectedKey) {
+      console.error('ADMIN_KEY environment variable not set!');
+      return res.status(500).json({ 
+        error: 'Server configuration error. Admin access not configured.' 
+      });
+    }
+    
+    if (!adminKey || adminKey !== expectedKey) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -983,9 +990,16 @@ app.post('/api/admin/tickets/:ticketId/respond', async (req, res) => {
     const { ticketId } = req.params;
     const { response, status } = req.body;
     const adminKey = req.query.key || req.headers['x-admin-key'];
-    const expectedKey = process.env.ADMIN_KEY || 'focufy-admin-2024';
+    const expectedKey = process.env.ADMIN_KEY;
     
-    if (adminKey !== expectedKey) {
+    if (!expectedKey) {
+      console.error('ADMIN_KEY environment variable not set!');
+      return res.status(500).json({ 
+        error: 'Server configuration error. Admin access not configured.' 
+      });
+    }
+    
+    if (!adminKey || adminKey !== expectedKey) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
