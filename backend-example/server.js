@@ -1187,7 +1187,33 @@ app.get('/api/admin/tickets', async (req, res) => {
 app.get('/admin/tickets', async (req, res) => {
   try {
     const adminKey = req.query.key;
-    const expectedKey = process.env.ADMIN_KEY || 'focufy-admin-2024';
+    const expectedKey = process.env.ADMIN_KEY;
+    
+    if (!expectedKey) {
+      return res.status(500).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Focufy Admin - Configuration Error</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 40px; text-align: center; background: #f5f5f5; }
+            .container { max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+            h1 { color: #dc2626; }
+            code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>⚠️ Configuration Error</h1>
+            <p>ADMIN_KEY environment variable is not set.</p>
+            <p style="margin-top: 20px; color: #64748b; font-size: 14px;">
+              Please set the <code>ADMIN_KEY</code> environment variable in Render dashboard.
+            </p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
     
     if (!adminKey || adminKey !== expectedKey) {
       return res.status(401).send(`
@@ -1206,9 +1232,9 @@ app.get('/admin/tickets', async (req, res) => {
           <div class="container">
             <h1>🔒 Unauthorized</h1>
             <p>Please provide the admin key in the URL:</p>
-            <p><code>?key=focufy-admin-2024</code></p>
+            <p><code>?key=YOUR_ADMIN_KEY</code></p>
             <p style="margin-top: 20px; color: #64748b; font-size: 14px;">
-              Or set <code>ADMIN_KEY</code> environment variable in Render and use that value.
+              Use the <code>ADMIN_KEY</code> value you set in Render environment variables.
             </p>
           </div>
         </body>
