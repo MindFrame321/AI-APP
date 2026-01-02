@@ -85,42 +85,108 @@ async function sendMessage() {
   const typingId = addTypingIndicator();
   
   try {
-    // Get user auth token
-    const result = await chrome.storage.local.get(['authToken', 'user']);
-    if (!result.authToken || !result.user) {
-      removeTypingIndicator(typingId);
-      addBotMessage("Please sign in with Google to use the AI assistant. You can also create a support ticket without signing in.");
-      return;
+    // Get user auth token (optional - we'll use direct API if not available)
+    const result = await chrome.storage.local.get(['authToken', 'user', 'settings']);
+
+    // Try backend first, fallback to direct API
+    let aiResponse = null;
+    let needsHumanHelp = false;
+
+    // Try backend API if user is signed in
+    if (result.authToken && result.user) {
+      try {
+        const response = await fetch(`${backendUrl}/api/support/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${result.authToken}`
+          },
+          body: JSON.stringify({
+            message,
+            conversationHistory: conversationHistory.slice(-10) // Last 10 messages
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          aiResponse = data.response;
+          needsHumanHelp = data.needsHumanHelp || false;
+        } else {
+          console.warn('Backend API failed, trying direct API...');
+          throw new Error('Backend unavailable');
+        }
+      } catch (backendError) {
+        console.warn('Backend error, using direct API fallback:', backendError);
+        // Fall through to direct API
+      }
     }
 
-    // Get AI response from backend
-    const response = await fetch(`${backendUrl}/api/support/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${result.authToken}`
-      },
-      body: JSON.stringify({
-        message,
-        conversationHistory: conversationHistory.slice(-10) // Last 10 messages
-      })
-    });
+    // Fallback to direct Gemini API
+    if (!aiResponse) {
+      const apiKey = result.settings?.apiKey || 'AIzaSyDtmZYEgp9XwqIO4VgCE8J2QH7IIE_gJt4';
+      
+      if (!apiKey) {
+        throw new Error('No API key available');
+      }
 
-    if (!response.ok) {
-      throw new Error('Backend error');
+      const historyContext = conversationHistory
+        .slice(-5)
+        .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+        .join('\n');
+
+      const prompt = `You are Focufy's customer support AI assistant. Focufy is a Chrome extension that helps users stay focused by blocking distracting elements on websites using AI.
+
+${historyContext ? `Previous conversation:\n${historyContext}\n\n` : ''}User Question: "${message}"
+
+Answer the question helpfully and concisely. If the question is too complex or requires human assistance, suggest creating a support ticket.
+
+Common topics:
+- How to use Focufy
+- Setting up focus sessions
+- YouTube blocking
+- Premium features
+- Troubleshooting
+- Trial and subscriptions
+- API key issues
+- Backend configuration
+
+Keep responses under 200 words. Be friendly and helpful.`;
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 300
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || 
+        "I'm having trouble right now. Please create a support ticket for assistance.";
+      
+      needsHumanHelp = aiResponse.toLowerCase().includes('support ticket') ||
+                      aiResponse.toLowerCase().includes('create a ticket') ||
+                      aiResponse.toLowerCase().includes('contact support');
     }
-
-    const data = await response.json();
     
     // Remove typing indicator
     removeTypingIndicator(typingId);
     
     // Add bot response
-    addBotMessage(data.response);
-    conversationHistory.push({ role: 'assistant', content: data.response });
+    addBotMessage(aiResponse.trim());
+    conversationHistory.push({ role: 'assistant', content: aiResponse.trim() });
     
     // If AI suggests creating a ticket, show ticket tab
-    if (data.needsHumanHelp) {
+    if (needsHumanHelp) {
       setTimeout(() => {
         addBotMessage("💡 You can create a support ticket using the 'Create Ticket' tab above for faster assistance!");
       }, 2000);
