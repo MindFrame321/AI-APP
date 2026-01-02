@@ -436,11 +436,11 @@ function showTicketModal(ticket) {
 
         ${ticket.responses && ticket.responses.length > 0 ? `
           <div class="ticket-detail-section">
-            <h3>Responses (${ticket.responses.length})</h3>
+            <h3>Conversation (${ticket.responses.length})</h3>
             ${ticket.responses.map((response, idx) => `
-              <div class="ticket-response-box">
+              <div class="ticket-response-box ${response.respondedBy === 'User' ? 'user-response' : 'admin-response'}">
                 <div class="response-header">
-                  <strong>Admin Response #${idx + 1}</strong>
+                  <strong>${response.respondedBy === 'User' ? 'You' : 'Admin'} ${response.respondedBy === 'Admin' ? `Response #${idx + 1}` : ''}</strong>
                   <span class="response-date">${new Date(response.respondedAt).toLocaleString()}</span>
                 </div>
                 <div class="response-message">${escapeHtml(response.message).replace(/\n/g, '<br>')}</div>
@@ -452,6 +452,15 @@ function showTicketModal(ticket) {
             <p class="no-response-text">No responses yet. We'll get back to you soon!</p>
           </div>
         `}
+        
+        <div class="ticket-detail-section">
+          <h3>Add Reply</h3>
+          <textarea id="userReplyText" class="user-reply-textarea" placeholder="Type your reply here..." rows="4"></textarea>
+          <div class="user-reply-actions">
+            <button class="btn-primary" id="submitReplyBtn">Send Reply</button>
+            <div id="replyStatus" class="reply-status"></div>
+          </div>
+        </div>
       </div>
       <div class="ticket-modal-footer">
         <button class="btn-primary" id="modalCloseBtnFooter">Close</button>
