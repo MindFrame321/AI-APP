@@ -991,10 +991,14 @@ app.get('/', (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Backend proxy running on port ${PORT}`);
+  console.log(`✅ Backend proxy running on port ${PORT}`);
   console.log(`📋 Admin tickets page: http://localhost:${PORT}/admin/tickets?key=focufy-admin-2024`);
   console.log(`📋 Admin API: http://localhost:${PORT}/api/admin/tickets?key=focufy-admin-2024`);
+  console.log(`🌐 Health check: http://localhost:${PORT}/`);
+}).on('error', (err) => {
+  console.error('❌ Server failed to start:', err);
+  process.exit(1);
 });
 
