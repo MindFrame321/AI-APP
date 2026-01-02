@@ -841,8 +841,8 @@ async function signInWithGoogle() {
         token = await new Promise((resolve, reject) => {
           chrome.identity.getAuthToken(
             {
-              interactive: true,
-              scopes: ['openid', 'email', 'profile']
+              interactive: true
+              // Scopes are defined in manifest.json, no need to specify here for Chrome Extension OAuth clients
             },
             (authToken) => {
               if (chrome.runtime.lastError) {

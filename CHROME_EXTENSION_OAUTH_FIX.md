@@ -2,7 +2,11 @@
 
 ## Error: "invalid_request" with Chrome Extension OAuth Client
 
-This error usually means the OAuth consent screen or Chrome Extension OAuth client isn't fully configured.
+This error usually means:
+1. **OAuth consent screen is not configured** (most common)
+2. **Scopes are not added to the consent screen**
+3. **Test users are not added** (if using External user type)
+4. **Extension ID mismatch** in the OAuth client
 
 ## Step-by-Step Fix
 
