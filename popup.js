@@ -847,6 +847,8 @@ async function signInWithGoogle() {
             (authToken) => {
               if (chrome.runtime.lastError) {
                 const error = chrome.runtime.lastError.message;
+                console.error('getAuthToken error:', error);
+                console.error('Full error details:', chrome.runtime.lastError);
                 // If it's a WEB client type error, fall back to launchWebAuthFlow
                 if (error.includes('WEB') || error.includes('invalid_request') || error.includes('Custom scheme')) {
                   console.log('WEB client detected, will use launchWebAuthFlow');
@@ -857,6 +859,7 @@ async function signInWithGoogle() {
               } else if (!authToken) {
                 reject(new Error('Authentication was cancelled or failed'));
               } else {
+                console.log('✅ Successfully got auth token');
                 resolve(authToken);
               }
             }
