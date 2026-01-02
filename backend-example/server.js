@@ -47,6 +47,63 @@ const GOOGLE_CLOUD_PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID; // Your Goo
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY; // Fallback API key (if auto-generation fails)
 const DAILY_LIMIT_PER_USER = 1000; // High limit (effectively unlimited per user)
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'prithivponns@gmail.com'; // Support email to receive tickets
+const ADMIN_KEY_ROTATION_INTERVAL = 10 * 60 * 1000; // 10 minutes in milliseconds
+
+// Rotating Admin Key System
+// Generates a time-based key that changes every 10 minutes
+function getCurrentTimeSlot() {
+  // Round down to nearest 10-minute interval
+  const now = Date.now();
+  return Math.floor(now / ADMIN_KEY_ROTATION_INTERVAL);
+}
+
+function generateRotatingKey(masterKey, timeSlot) {
+  // Use HMAC to generate a deterministic key based on master key + time slot
+  const hmac = crypto.createHmac('sha256', masterKey);
+  hmac.update(`admin-key-${timeSlot}`);
+  return hmac.digest('hex').substring(0, 32); // Use first 32 chars for readability
+}
+
+function getCurrentAdminKey() {
+  const masterKey = process.env.ADMIN_KEY;
+  if (!masterKey) {
+    return null;
+  }
+  const timeSlot = getCurrentTimeSlot();
+  return generateRotatingKey(masterKey, timeSlot);
+}
+
+function isValidAdminKey(providedKey) {
+  const masterKey = process.env.ADMIN_KEY;
+  if (!masterKey) {
+    return false;
+  }
+  
+  if (!providedKey) {
+    return false;
+  }
+  
+  // Check current time slot
+  const currentTimeSlot = getCurrentTimeSlot();
+  const currentKey = generateRotatingKey(masterKey, currentTimeSlot);
+  if (providedKey === currentKey) {
+    return true;
+  }
+  
+  // Also accept previous time slot (to handle clock skew and transitions)
+  const previousTimeSlot = currentTimeSlot - 1;
+  const previousKey = generateRotatingKey(masterKey, previousTimeSlot);
+  if (providedKey === previousKey) {
+    return true;
+  }
+  
+  // Also accept master key directly (for emergency access)
+  if (providedKey === masterKey) {
+    return true;
+  }
+  
+  return false;
+}
 
 // Initialize Google Auth for Service Account (REQUIRED for automatic key generation)
 let serviceAccountAuth = null;
