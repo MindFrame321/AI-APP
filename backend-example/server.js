@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { OAuth2Client, GoogleAuth } = require('google-auth-library');
 const { MongoClient } = require('mongodb');
+const crypto = require('crypto');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const app = express();
@@ -945,16 +946,8 @@ app.post('/api/admin/tickets/:ticketId/close', async (req, res) => {
   try {
     const { ticketId } = req.params;
     const adminKey = req.query.key || req.headers['x-admin-key'];
-    const expectedKey = process.env.ADMIN_KEY;
     
-    if (!expectedKey) {
-      console.error('ADMIN_KEY environment variable not set!');
-      return res.status(500).json({ 
-        error: 'Server configuration error. Admin access not configured.' 
-      });
-    }
-    
-    if (!adminKey || adminKey !== expectedKey) {
+    if (!isValidAdminKey(adminKey)) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -990,16 +983,8 @@ app.post('/api/admin/tickets/:ticketId/respond', async (req, res) => {
     const { ticketId } = req.params;
     const { response, status } = req.body;
     const adminKey = req.query.key || req.headers['x-admin-key'];
-    const expectedKey = process.env.ADMIN_KEY;
     
-    if (!expectedKey) {
-      console.error('ADMIN_KEY environment variable not set!');
-      return res.status(500).json({ 
-        error: 'Server configuration error. Admin access not configured.' 
-      });
-    }
-    
-    if (!adminKey || adminKey !== expectedKey) {
+    if (!isValidAdminKey(adminKey)) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -1142,16 +1127,8 @@ app.get('/api/admin/tickets', async (req, res) => {
   try {
     // Admin key check - REQUIRED environment variable
     const adminKey = req.query.key || req.headers['x-admin-key'];
-    const expectedKey = process.env.ADMIN_KEY;
     
-    if (!expectedKey) {
-      console.error('ADMIN_KEY environment variable not set!');
-      return res.status(500).json({ 
-        error: 'Server configuration error. Admin access not configured.' 
-      });
-    }
-    
-    if (!adminKey || adminKey !== expectedKey) {
+    if (!isValidAdminKey(adminKey)) {
       return res.status(401).json({ 
         error: 'Unauthorized. Provide ?key=YOUR_ADMIN_KEY or X-Admin-Key header' 
       });
@@ -1183,39 +1160,48 @@ app.get('/api/admin/tickets', async (req, res) => {
   }
 });
 
+// Endpoint to get current rotating admin key (protected by master key)
+app.get('/admin/get-key', async (req, res) => {
+  try {
+    const masterKey = req.query.masterKey || req.headers['x-master-key'];
+    const expectedMasterKey = process.env.ADMIN_KEY;
+    
+    if (!expectedMasterKey) {
+      return res.status(500).json({ 
+        error: 'Server configuration error. ADMIN_KEY not set.' 
+      });
+    }
+    
+    if (!masterKey || masterKey !== expectedMasterKey) {
+      return res.status(401).json({ 
+        error: 'Unauthorized. Provide master ADMIN_KEY to get current rotating key.' 
+      });
+    }
+    
+    const currentKey = getCurrentAdminKey();
+    const nextRotation = new Date((getCurrentTimeSlot() + 1) * ADMIN_KEY_ROTATION_INTERVAL);
+    const timeUntilRotation = nextRotation.getTime() - Date.now();
+    const minutesUntilRotation = Math.ceil(timeUntilRotation / 60000);
+    
+    res.json({
+      success: true,
+      currentKey: currentKey,
+      expiresIn: minutesUntilRotation,
+      expiresAt: nextRotation.toISOString(),
+      note: 'This key rotates every 10 minutes. Use the master ADMIN_KEY to get the current key.'
+    });
+  } catch (error) {
+    console.error('Get key error:', error);
+    res.status(500).json({ error: 'Failed to get current key' });
+  }
+});
+
 // Simple HTML page to view tickets (admin dashboard)
 app.get('/admin/tickets', async (req, res) => {
   try {
     const adminKey = req.query.key;
-    const expectedKey = process.env.ADMIN_KEY;
     
-    if (!expectedKey) {
-      return res.status(500).send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Focufy Admin - Configuration Error</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 40px; text-align: center; background: #f5f5f5; }
-            .container { max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-            h1 { color: #dc2626; }
-            code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <h1>⚠️ Configuration Error</h1>
-            <p>ADMIN_KEY environment variable is not set.</p>
-            <p style="margin-top: 20px; color: #64748b; font-size: 14px;">
-              Please set the <code>ADMIN_KEY</code> environment variable in Render dashboard.
-            </p>
-          </div>
-        </body>
-        </html>
-      `);
-    }
-    
-    if (!adminKey || adminKey !== expectedKey) {
+    if (!isValidAdminKey(adminKey)) {
       return res.status(401).send(`
         <!DOCTYPE html>
         <html>
@@ -1245,6 +1231,11 @@ app.get('/admin/tickets', async (req, res) => {
   const allTickets = (await getAllTickets())
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
+  const currentKey = getCurrentAdminKey();
+  const nextRotation = new Date((getCurrentTimeSlot() + 1) * ADMIN_KEY_ROTATION_INTERVAL);
+  const timeUntilRotation = nextRotation.getTime() - Date.now();
+  const minutesUntilRotation = Math.ceil(timeUntilRotation / 60000);
+  
   const html = `
     <!DOCTYPE html>
     <html>
@@ -1254,9 +1245,15 @@ app.get('/admin/tickets', async (req, res) => {
         body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
         .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         h1 { color: #667eea; }
+        .key-info { background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
+        .key-info strong { color: #0369a1; }
+        .key-warning { color: #dc2626; font-size: 12px; margin-top: 5px; }
         .stats { display: flex; gap: 20px; margin-bottom: 30px; }
         .stat-card { background: #f8fafc; padding: 20px; border-radius: 8px; flex: 1; }
         .stat-number { font-size: 32px; font-weight: bold; color: #667eea; }
+        .key-info { background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
+        .key-info strong { color: #0369a1; }
+        .key-warning { color: #dc2626; font-size: 12px; margin-top: 5px; }
         .ticket { border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 20px; background: #f8fafc; }
         .ticket-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
         .ticket-id { font-family: monospace; color: #64748b; font-size: 12px; }
