@@ -820,129 +820,38 @@ async function signInWithGoogle() {
     showStatus('Signing in with Google...', 'success');
     
     // Check if chrome.identity is available
-    if (!chrome.identity) {
+    if (!chrome.identity || !chrome.identity.getAuthToken) {
       throw new Error('Chrome Identity API not available. Make sure you\'re running as a Chrome extension.');
     }
     
-    let token = null;
+    // Use chrome.identity.getAuthToken - this is the correct method for Chrome Extensions
+    // It uses the oauth2.client_id and scopes from manifest.json automatically
+    // No custom redirect URIs needed - Chrome handles everything
+    console.log('Requesting Google auth token using chrome.identity.getAuthToken...');
+    console.log('Using client_id and scopes from manifest.json');
     
-    // Check if we should use launchWebAuthFlow directly (for WEB client type)
-    // getAuthToken only works with Chrome App OAuth clients
-    // If you're getting "Custom scheme URIs are not allowed for 'WEB' client type" error,
-    // you need to create a Chrome App OAuth client instead (see OAUTH_CLIENT_SETUP.md)
-    
-    // Try getAuthToken first (works with Chrome App OAuth clients)
-    // Skip if we know it's a WEB client to avoid unnecessary errors
-    const useLaunchWebAuthFlow = false; // Set to true to force launchWebAuthFlow
-    
-    if (!useLaunchWebAuthFlow && chrome.identity.getAuthToken) {
-      try {
-        console.log('Trying getAuthToken (Chrome App OAuth client)...');
-        token = await new Promise((resolve, reject) => {
-          chrome.identity.getAuthToken(
-            {
-              interactive: true
-              // Scopes are defined in manifest.json, no need to specify here for Chrome Extension OAuth clients
-            },
-            (authToken) => {
-              if (chrome.runtime.lastError) {
-                const error = chrome.runtime.lastError.message;
-                console.error('getAuthToken error:', error);
-                console.error('Full error details:', chrome.runtime.lastError);
-                // If it's a WEB client type error, fall back to launchWebAuthFlow
-                if (error.includes('WEB') || error.includes('invalid_request') || error.includes('Custom scheme')) {
-                  console.log('WEB client detected, will use launchWebAuthFlow');
-                  reject(new Error('WEB_CLIENT_FALLBACK'));
-                } else {
-                  reject(new Error(error));
-                }
-              } else if (!authToken) {
-                reject(new Error('Authentication was cancelled or failed'));
-              } else {
-                console.log('✅ Successfully got auth token');
-                resolve(authToken);
-              }
-            }
-          );
-        });
-        console.log('✅ getAuthToken succeeded');
-      } catch (getAuthTokenError) {
-        // If it's specifically a WEB client error, fall back to launchWebAuthFlow
-        if (getAuthTokenError.message === 'WEB_CLIENT_FALLBACK') {
-          console.log('getAuthToken failed (WEB client type), trying launchWebAuthFlow...');
-          token = null; // Will be set below
-        } else {
-          throw getAuthTokenError;
-        }
-      }
-    }
-    
-    // Don't use launchWebAuthFlow for WEB clients - it also requires redirect URI setup
-    // The solution is to create a Chrome App OAuth client instead
-    if (!token && !isWebClient && chrome.identity.launchWebAuthFlow) {
-      console.log('Using launchWebAuthFlow (Web application OAuth client)...');
-      
-      // Get the extension's redirect URL
-      const redirectUrl = chrome.identity.getRedirectURL();
-      console.log('Redirect URL:', redirectUrl);
-      
-      // OAuth configuration - using Web application client (fallback only)
-      // Primary client ID is in manifest.json (Chrome Extension OAuth client)
-      const clientId = '42484888880-lpmdq3tm3btgsb793d1qj3hi62r1ffo0.apps.googleusercontent.com';
-      const scopes = ['openid', 'email', 'profile'].join(' ');
-      
-      // Build the OAuth URL
-      const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-      authUrl.searchParams.set('client_id', clientId);
-      authUrl.searchParams.set('redirect_uri', redirectUrl);
-      authUrl.searchParams.set('response_type', 'token');
-      authUrl.searchParams.set('scope', scopes);
-      authUrl.searchParams.set('prompt', 'select_account');
-      
-      console.log('Launching auth flow...');
-      
-      // Launch the OAuth flow
-      const responseUrl = await new Promise((resolve, reject) => {
-        chrome.identity.launchWebAuthFlow(
-          {
-            url: authUrl.toString(),
-            interactive: true
-          },
-          (callbackUrl) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-            } else if (!callbackUrl) {
-              reject(new Error('Authentication was cancelled'));
-            } else {
-              resolve(callbackUrl);
-            }
+    const token = await new Promise((resolve, reject) => {
+      chrome.identity.getAuthToken(
+        {
+          interactive: true
+          // Scopes are automatically read from manifest.json oauth2.scopes
+          // Client ID is automatically read from manifest.json oauth2.client_id
+        },
+        (authToken) => {
+          if (chrome.runtime.lastError) {
+            const error = chrome.runtime.lastError.message;
+            console.error('getAuthToken error:', error);
+            console.error('Full error details:', chrome.runtime.lastError);
+            reject(new Error(error));
+          } else if (!authToken) {
+            reject(new Error('Authentication was cancelled or failed'));
+          } else {
+            console.log('✅ Successfully got auth token');
+            resolve(authToken);
           }
-        );
-      });
-      
-      console.log('Auth flow completed, parsing response...');
-      
-      // Extract the access token from the callback URL
-      const urlHash = responseUrl.split('#')[1];
-      if (!urlHash) {
-        throw new Error('No token in response');
-      }
-      
-      const params = new URLSearchParams(urlHash);
-      token = params.get('access_token');
-      
-      if (!token) {
-        const error = params.get('error');
-        const errorDescription = params.get('error_description');
-        throw new Error(errorDescription || error || 'No access token received');
-      }
-      
-      console.log('✅ launchWebAuthFlow succeeded');
-    }
-    
-    if (!token) {
-      throw new Error('No authentication method available');
-    }
+        }
+      );
+    });
     
     console.log('Got token! Fetching user info...');
     
