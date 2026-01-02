@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { OAuth2Client, GoogleAuth } = require('google-auth-library');
+const { MongoClient } = require('mongodb');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const app = express();
@@ -61,10 +62,42 @@ const userUsage = new Map(); // userId -> { count: number, date: string }
 // userId -> { apiKey: string, createdAt: Date, lastUsed: Date, source: 'auto-generated' | 'user-provided' }
 const userApiKeys = new Map();
 
-// In-memory storage for support tickets (Use Database in production)
-// ticketId -> { ticketId, userId, userEmail, subject, message, status, createdAt, updatedAt, responses: [] }
+// MongoDB connection and collections
+let mongoClient = null;
+let db = null;
+let ticketsCollection = null;
+
+// Initialize MongoDB connection
+async function initMongoDB() {
+  try {
+    if (!MONGODB_URI || MONGODB_URI === 'mongodb://localhost:27017/focufy') {
+      console.warn('⚠️ MONGODB_URI not set, using in-memory storage (data will be lost on restart)');
+      return false;
+    }
+    
+    mongoClient = new MongoClient(MONGODB_URI);
+    await mongoClient.connect();
+    db = mongoClient.db();
+    ticketsCollection = db.collection('supportTickets');
+    
+    // Create indexes
+    await ticketsCollection.createIndex({ ticketId: 1 }, { unique: true });
+    await ticketsCollection.createIndex({ userId: 1 });
+    await ticketsCollection.createIndex({ createdAt: -1 });
+    
+    console.log('✅ MongoDB connected successfully');
+    return true;
+  } catch (error) {
+    console.error('❌ MongoDB connection failed:', error.message);
+    console.warn('⚠️ Falling back to in-memory storage');
+    return false;
+  }
+}
+
+// Fallback in-memory storage (if MongoDB not available)
 const supportTickets = new Map();
 let ticketCounter = 1;
+let useMongoDB = false;
 
 // Send email notification for new support ticket
 async function sendTicketEmailNotification(ticket) {
@@ -692,7 +725,7 @@ app.post('/api/support/tickets', authMiddleware, async (req, res) => {
       responses: []
     };
 
-    supportTickets.set(ticketId, ticket);
+    await setTicket(ticket);
     console.log(`✅ Support ticket created: ${ticketId} by ${userEmail}`);
 
     // Send email notification (async, don't wait for it)
@@ -720,8 +753,7 @@ app.post('/api/support/tickets', authMiddleware, async (req, res) => {
 app.get('/api/support/tickets', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.sub;
-    const userTickets = Array.from(supportTickets.values())
-      .filter(ticket => ticket.userId === userId)
+    const userTickets = (await getUserTickets(userId))
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .map(ticket => ({
         ticketId: ticket.ticketId,
@@ -750,10 +782,11 @@ app.get('/api/support/tickets/:ticketId', authMiddleware, async (req, res) => {
     const userId = req.user.sub;
 
     console.log(`[Get Ticket] Looking for ticket: ${ticketId}, User: ${userId}`);
-    console.log(`[Get Ticket] Total tickets in store: ${supportTickets.size}`);
-    console.log(`[Get Ticket] Ticket IDs in store:`, Array.from(supportTickets.keys()));
+    const allTickets = await getAllTickets();
+    console.log(`[Get Ticket] Total tickets in store: ${allTickets.length}`);
+    console.log(`[Get Ticket] Ticket IDs in store:`, allTickets.map(t => t.ticketId));
 
-    const ticket = supportTickets.get(ticketId);
+    const ticket = await getTicket(ticketId);
     if (!ticket) {
       console.log(`[Get Ticket] Ticket ${ticketId} not found in store`);
       return res.status(404).json({ error: 'Ticket not found' });
@@ -787,7 +820,7 @@ app.post('/api/support/tickets/:ticketId/reply', authMiddleware, async (req, res
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    const ticket = supportTickets.get(ticketId);
+    const ticket = await getTicket(ticketId);
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
@@ -798,6 +831,9 @@ app.post('/api/support/tickets/:ticketId/reply', authMiddleware, async (req, res
     }
 
     // Add user reply
+    if (!ticket.responses) {
+      ticket.responses = [];
+    }
     ticket.responses.push({
       message: message.trim(),
       respondedBy: 'User',
@@ -805,7 +841,7 @@ app.post('/api/support/tickets/:ticketId/reply', authMiddleware, async (req, res
     });
 
     ticket.updatedAt = new Date().toISOString();
-    supportTickets.set(ticketId, ticket);
+    await setTicket(ticket);
 
     console.log(`✅ User reply added to ticket ${ticketId}`);
 
@@ -840,12 +876,15 @@ app.post('/api/admin/tickets/:ticketId/respond', async (req, res) => {
       return res.status(400).json({ error: 'Response message is required' });
     }
 
-    const ticket = supportTickets.get(ticketId);
+    const ticket = await getTicket(ticketId);
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
 
     // Add response
+    if (!ticket.responses) {
+      ticket.responses = [];
+    }
     ticket.responses.push({
       message: response.trim(),
       respondedBy: 'Admin',
@@ -858,7 +897,7 @@ app.post('/api/admin/tickets/:ticketId/respond', async (req, res) => {
     }
 
     ticket.updatedAt = new Date().toISOString();
-    supportTickets.set(ticketId, ticket);
+    await setTicket(ticket);
 
     console.log(`✅ Response added to ticket ${ticketId} by admin`);
 
@@ -1031,7 +1070,7 @@ app.get('/admin/tickets', async (req, res) => {
       `);
     }
 
-  const allTickets = Array.from(supportTickets.values())
+  const allTickets = (await getAllTickets())
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   const html = `
