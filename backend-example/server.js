@@ -992,18 +992,6 @@ app.get('/admin/tickets', async (req, res) => {
   res.send(html);
 });
 
-// Health check endpoint
-app.get('/', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    message: 'Focufy Backend API',
-    endpoints: {
-      adminTickets: '/admin/tickets?key=YOUR_ADMIN_KEY',
-      adminApi: '/api/admin/tickets?key=YOUR_ADMIN_KEY'
-    }
-  });
-});
-
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`✅ Backend proxy running on port ${PORT}`);
