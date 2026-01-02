@@ -203,18 +203,19 @@ async function generateUserApiKeyWithServiceAccount(userId, userEmail) {
         throw new Error(`Operation did not complete within ${maxAttempts * 2} seconds. Operation: ${operationName}`);
       }
       
-      // Extract the key name from the operation response
-      // The response should contain the key in operation.response.name
-      if (operation.response && operation.response.name) {
+      // Extract the key name or keyString from the operation response
+      console.log('📋 Full operation response:', JSON.stringify(operation, null, 2));
+      
+      if (operation.response && operation.response.keyString) {
+        // The key string is directly in the operation response - this is the preferred method
+        console.log(`✅ Operation completed, key string found in operation response`);
+        return operation.response.keyString;
+      } else if (operation.response && operation.response.name) {
         keyName = operation.response.name;
         console.log(`✅ Operation completed, key name: ${keyName}`);
-      } else if (operation.response && operation.response.keyString) {
-        // Sometimes the key string is directly in the operation response
-        console.log(`✅ Operation completed, key string in response`);
-        return operation.response.keyString;
       } else {
         console.error('❌ Operation completed but no key name or keyString in response:', JSON.stringify(operation, null, 2));
-        throw new Error('Operation completed but could not extract key name from response');
+        throw new Error('Operation completed but could not extract key name or keyString from response');
       }
     }
     
@@ -224,15 +225,20 @@ async function generateUserApiKeyWithServiceAccount(userId, userEmail) {
     
     console.log(`🔑 Key name: ${keyName}, attempting to retrieve key string...`);
     
+    // Wait a moment for the key to be fully propagated (sometimes there's a small delay)
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
     // Get the actual key string (the secret) using getKeyString method
+    // Note: getKeyString is a POST method, not GET
     const keyDetailsResponse = await fetch(
       `https://apikeys.googleapis.com/v2/${keyName}:getKeyString`,
       {
-        method: 'GET',
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify({}) // Empty body for POST
       }
     );
     
