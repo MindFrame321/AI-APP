@@ -807,7 +807,9 @@ app.post('/api/support/tickets', authMiddleware, async (req, res) => {
 app.get('/api/support/tickets', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.sub;
+    // Filter out closed tickets - users shouldn't see closed tickets
     const userTickets = (await getUserTickets(userId))
+      .filter(ticket => ticket.status !== 'closed') // Hide closed tickets
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .map(ticket => ({
         ticketId: ticket.ticketId,
@@ -882,6 +884,11 @@ app.post('/api/support/tickets/:ticketId/reply', authMiddleware, async (req, res
     // Verify user owns this ticket
     if (ticket.userId !== userId) {
       return res.status(403).json({ error: 'Unauthorized - you can only reply to your own tickets' });
+    }
+
+    // Prevent replies to closed tickets
+    if (ticket.status === 'closed') {
+      return res.status(400).json({ error: 'Cannot reply to a closed ticket' });
     }
 
     // Add user reply

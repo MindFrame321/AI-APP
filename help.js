@@ -490,14 +490,23 @@ function showTicketModal(ticket) {
           </div>
         `}
         
-        <div class="ticket-detail-section">
-          <h3>Add Reply</h3>
-          <textarea id="userReplyText" class="user-reply-textarea" placeholder="Type your reply here..." rows="4"></textarea>
-          <div class="user-reply-actions">
-            <button class="btn-primary" id="submitReplyBtn">Send Reply</button>
-            <div id="replyStatus" class="reply-status"></div>
+        ${ticket.status === 'closed' ? `
+          <div class="ticket-detail-section">
+            <div class="ticket-closed-notice">
+              <strong>🔒 This ticket is closed</strong>
+              <p>This ticket has been closed. You cannot send additional replies.</p>
+            </div>
           </div>
-        </div>
+        ` : `
+          <div class="ticket-detail-section">
+            <h3>Add Reply</h3>
+            <textarea id="userReplyText" class="user-reply-textarea" placeholder="Type your reply here..." rows="4"></textarea>
+            <div class="user-reply-actions">
+              <button class="btn-primary" id="submitReplyBtn">Send Reply</button>
+              <div id="replyStatus" class="reply-status"></div>
+            </div>
+          </div>
+        `}
       </div>
       <div class="ticket-modal-footer">
         <button class="btn-primary" id="modalCloseBtnFooter">Close</button>

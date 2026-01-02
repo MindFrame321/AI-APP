@@ -640,3 +640,25 @@ header h1 {
   border-left-color: #10b981;
 }
 
+.ticket-closed-notice {
+  background: #fef3c7;
+  border: 2px solid #fbbf24;
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+  margin-top: 20px;
+}
+
+.ticket-closed-notice strong {
+  display: block;
+  color: #92400e;
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.ticket-closed-notice p {
+  color: #78350f;
+  font-size: 14px;
+  margin: 0;
+}
+
