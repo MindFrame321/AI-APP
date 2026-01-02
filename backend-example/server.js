@@ -997,8 +997,8 @@ app.get('/admin/tickets', async (req, res) => {
         .status-open { background: #dbeafe; color: #1e40af; }
         .ticket-subject { font-size: 18px; font-weight: 600; color: #1e293b; margin: 10px 0; }
         .ticket-meta { display: flex; gap: 15px; font-size: 12px; color: #64748b; margin-bottom: 15px; }
-        .ticket-message { background: white; padding: 15px; border-radius: 6px; border-left: 3px solid #667eea; margin-top: 10px; white-space: pre-wrap; }
-        .responses-section { margin-top: 20px; padding-top: 20px; border-top: 2px solid #e2e8f0; }
+        .ticket-message { background: white; padding: 15px; border-radius: 6px; border-left: 3px solid #667eea; margin-top: 10px; white-space: pre-wrap; margin-bottom: 20px; }
+        .responses-section { margin-top: 20px; padding-top: 20px; border-top: 2px solid #e2e8f0; margin-bottom: 20px; }
         .responses-section h3 { font-size: 16px; color: #1e293b; margin-bottom: 15px; }
         .response-item { background: white; padding: 15px; border-radius: 6px; border-left: 3px solid #10b981; margin-bottom: 10px; }
         .response-header { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; }
