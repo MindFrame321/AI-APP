@@ -236,19 +236,24 @@ async function submitTicket(e) {
       })
     });
 
-    let errorData;
+    // Read response body once
+    let data;
     try {
-      errorData = await response.json();
+      const responseText = await response.text();
+      if (responseText) {
+        data = JSON.parse(responseText);
+      } else {
+        data = {};
+      }
     } catch (e) {
-      errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
+      console.error('Failed to parse response:', e);
+      data = { error: `HTTP ${response.status}: ${response.statusText}` };
     }
 
     if (!response.ok) {
-      console.error('Ticket creation failed:', response.status, errorData);
-      throw new Error(errorData.error || errorData.details || 'Failed to create ticket');
+      console.error('Ticket creation failed:', response.status, data);
+      throw new Error(data.error || data.details || 'Failed to create ticket');
     }
-
-    const data = await response.json();
     
     statusDiv.className = 'ticket-status success';
     statusDiv.innerHTML = `✅ Ticket created successfully!<br>Ticket ID: <strong>${data.ticket.ticketId}</strong><br>We'll respond within 24 hours.`;
