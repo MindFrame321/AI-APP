@@ -102,11 +102,18 @@ async function generateUserApiKeyWithServiceAccount(userId, userEmail) {
       const errorText = await apiKeyResponse.text();
       console.error('API Key creation failed:', apiKeyResponse.status, errorText);
       
-      // If 404, the API might not be enabled or endpoint is wrong
+      // Provide helpful error messages
+      if (apiKeyResponse.status === 401 || apiKeyResponse.status === 403) {
+        throw new Error(`Authentication failed. Make sure:
+1. Service Account has "API Keys Admin" role (roles/serviceusage.apiKeysAdmin)
+2. "API Keys API" is enabled in Google Cloud Console
+3. Service Account JSON is correct`);
+      }
+      
       if (apiKeyResponse.status === 404) {
         throw new Error(`API Key Management API not found. Make sure:
 1. "API Keys API" is enabled in Google Cloud Console
-2. Service Account has "Service Account Key Admin" or "Owner" role
+2. Service Account has "API Keys Admin" role
 3. Project ID is correct: ${GOOGLE_CLOUD_PROJECT_ID}`);
       }
       
