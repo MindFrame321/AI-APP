@@ -396,12 +396,20 @@ function showTicketModal(ticket) {
   const modal = document.createElement('div');
   modal.id = 'ticketModal';
   modal.className = 'ticket-modal';
-  modal.innerHTML = `
-    <div class="ticket-modal-content">
-      <div class="ticket-modal-header">
-        <h2>Ticket Details</h2>
-        <button class="ticket-modal-close" onclick="closeTicketModal()">×</button>
-      </div>
+  
+  const modalContent = document.createElement('div');
+  modalContent.className = 'ticket-modal-content';
+  
+  const modalHeader = document.createElement('div');
+  modalHeader.className = 'ticket-modal-header';
+  modalHeader.innerHTML = `
+    <h2>Ticket Details</h2>
+    <button class="ticket-modal-close" id="modalCloseBtn">×</button>
+  `;
+  
+  const modalBody = document.createElement('div');
+  modalBody.className = 'ticket-modal-body';
+  modalBody.innerHTML = `
       <div class="ticket-modal-body">
         <div class="ticket-detail-section">
           <div class="ticket-detail-row">
@@ -463,12 +471,16 @@ function showTicketModal(ticket) {
 
 // Close ticket modal
 function closeTicketModal() {
+  console.log('Closing ticket modal');
   const modal = document.getElementById('ticketModal');
   if (modal) {
     modal.remove();
+    console.log('Modal removed');
+  } else {
+    console.warn('Modal not found');
   }
 }
 
-// Make functions global for onclick handlers
+// Make functions global
 window.viewTicketDetails = viewTicketDetails;
 window.closeTicketModal = closeTicketModal;
