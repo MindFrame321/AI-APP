@@ -820,31 +820,115 @@ async function signInWithGoogle() {
     showStatus('Signing in with Google...', 'success');
     
     // Check if chrome.identity is available
-    if (!chrome.identity || !chrome.identity.getAuthToken) {
+    if (!chrome.identity) {
       throw new Error('Chrome Identity API not available. Make sure you\'re running as a Chrome extension.');
     }
     
-    console.log('Requesting Google auth token...');
+    let token = null;
     
-    // Use chrome.identity.getAuthToken - this automatically handles redirect URIs
-    // No need to manually configure redirect URIs in Google Cloud Console
-    const token = await new Promise((resolve, reject) => {
-      chrome.identity.getAuthToken(
-        {
-          interactive: true,
-          scopes: ['openid', 'email', 'profile']
-        },
-        (token) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (!token) {
-            reject(new Error('Authentication was cancelled or failed'));
-          } else {
-            resolve(token);
-          }
+    // Try getAuthToken first (works with Chrome App OAuth clients)
+    if (chrome.identity.getAuthToken) {
+      try {
+        console.log('Trying getAuthToken (Chrome App OAuth client)...');
+        token = await new Promise((resolve, reject) => {
+          chrome.identity.getAuthToken(
+            {
+              interactive: true,
+              scopes: ['openid', 'email', 'profile']
+            },
+            (authToken) => {
+              if (chrome.runtime.lastError) {
+                const error = chrome.runtime.lastError.message;
+                // If it's a WEB client type error, fall back to launchWebAuthFlow
+                if (error.includes('WEB') || error.includes('invalid_request') || error.includes('Custom scheme')) {
+                  reject(new Error('WEB_CLIENT_FALLBACK'));
+                } else {
+                  reject(new Error(error));
+                }
+              } else if (!authToken) {
+                reject(new Error('Authentication was cancelled or failed'));
+              } else {
+                resolve(authToken);
+              }
+            }
+          );
+        });
+        console.log('✅ getAuthToken succeeded');
+      } catch (getAuthTokenError) {
+        // If it's specifically a WEB client error, fall back to launchWebAuthFlow
+        if (getAuthTokenError.message === 'WEB_CLIENT_FALLBACK') {
+          console.log('getAuthToken failed (WEB client type), trying launchWebAuthFlow...');
+          token = null; // Will be set below
+        } else {
+          throw getAuthTokenError;
         }
-      );
-    });
+      }
+    }
+    
+    // Fallback to launchWebAuthFlow (works with Web application OAuth clients)
+    if (!token && chrome.identity.launchWebAuthFlow) {
+      console.log('Using launchWebAuthFlow (Web application OAuth client)...');
+      
+      // Get the extension's redirect URL
+      const redirectUrl = chrome.identity.getRedirectURL();
+      console.log('Redirect URL:', redirectUrl);
+      
+      // OAuth configuration - using Web application client
+      const clientId = '42484888880-r0rgoel8vrhmk5tsdtfibb0jot3vgksd.apps.googleusercontent.com';
+      const scopes = ['openid', 'email', 'profile'].join(' ');
+      
+      // Build the OAuth URL
+      const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+      authUrl.searchParams.set('client_id', clientId);
+      authUrl.searchParams.set('redirect_uri', redirectUrl);
+      authUrl.searchParams.set('response_type', 'token');
+      authUrl.searchParams.set('scope', scopes);
+      authUrl.searchParams.set('prompt', 'select_account');
+      
+      console.log('Launching auth flow...');
+      
+      // Launch the OAuth flow
+      const responseUrl = await new Promise((resolve, reject) => {
+        chrome.identity.launchWebAuthFlow(
+          {
+            url: authUrl.toString(),
+            interactive: true
+          },
+          (callbackUrl) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else if (!callbackUrl) {
+              reject(new Error('Authentication was cancelled'));
+            } else {
+              resolve(callbackUrl);
+            }
+          }
+        );
+      });
+      
+      console.log('Auth flow completed, parsing response...');
+      
+      // Extract the access token from the callback URL
+      const urlHash = responseUrl.split('#')[1];
+      if (!urlHash) {
+        throw new Error('No token in response');
+      }
+      
+      const params = new URLSearchParams(urlHash);
+      token = params.get('access_token');
+      
+      if (!token) {
+        const error = params.get('error');
+        const errorDescription = params.get('error_description');
+        throw new Error(errorDescription || error || 'No access token received');
+      }
+      
+      console.log('✅ launchWebAuthFlow succeeded');
+    }
+    
+    if (!token) {
+      throw new Error('No authentication method available');
+    }
     
     console.log('Got token! Fetching user info...');
     
@@ -887,7 +971,11 @@ async function signInWithGoogle() {
     console.error('Google sign-in error:', error);
     let errorMessage = 'Sign-in failed. ';
     
-    if (error.message.includes('OAuth2') || error.message.includes('invalid_client')) {
+    if (error.message.includes('redirect_uri_mismatch') || error.message.includes('invalid_request')) {
+      const redirectUrl = chrome.identity ? chrome.identity.getRedirectURL() : 'unknown';
+      errorMessage = `Please add this redirect URI to Google Cloud Console:\n${redirectUrl}\n\nGo to: APIs & Services → Credentials → Edit your OAuth client → Authorized redirect URIs`;
+      console.error('Add this redirect URI to Google Cloud Console:', redirectUrl);
+    } else if (error.message.includes('OAuth2') || error.message.includes('invalid_client')) {
       errorMessage += 'OAuth configuration error. Please check the extension\'s OAuth client ID in manifest.json.';
     } else if (error.message.includes('access_denied')) {
       errorMessage = 'Access denied. Please try again.';
