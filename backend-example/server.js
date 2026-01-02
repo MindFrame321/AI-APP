@@ -99,6 +99,49 @@ const supportTickets = new Map();
 let ticketCounter = 1;
 let useMongoDB = false;
 
+// Helper functions for ticket operations (MongoDB or in-memory)
+async function getTicket(ticketId) {
+  if (useMongoDB && ticketsCollection) {
+    return await ticketsCollection.findOne({ ticketId });
+  }
+  return supportTickets.get(ticketId) || null;
+}
+
+async function setTicket(ticket) {
+  try {
+    if (useMongoDB && ticketsCollection) {
+      console.log('[setTicket] Saving to MongoDB:', ticket.ticketId);
+      await ticketsCollection.updateOne(
+        { ticketId: ticket.ticketId },
+        { $set: ticket },
+        { upsert: true }
+      );
+      console.log('[setTicket] Saved to MongoDB successfully');
+    } else {
+      console.log('[setTicket] Saving to in-memory storage:', ticket.ticketId);
+      supportTickets.set(ticket.ticketId, ticket);
+      console.log('[setTicket] Saved to in-memory storage successfully');
+    }
+  } catch (error) {
+    console.error('[setTicket] Error saving ticket:', error);
+    throw error;
+  }
+}
+
+async function getAllTickets() {
+  if (useMongoDB && ticketsCollection) {
+    return await ticketsCollection.find({}).toArray();
+  }
+  return Array.from(supportTickets.values());
+}
+
+async function getUserTickets(userId) {
+  if (useMongoDB && ticketsCollection) {
+    return await ticketsCollection.find({ userId }).toArray();
+  }
+  return Array.from(supportTickets.values()).filter(t => t.userId === userId);
+}
+
 // Send email notification for new support ticket
 async function sendTicketEmailNotification(ticket) {
   try {
