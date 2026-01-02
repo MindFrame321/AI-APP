@@ -9,7 +9,21 @@
 <body>
   <div class="container">
     <header>
-      <div class="logo">🎯</div>
+      <div class="logo">
+        <svg width="48" height="48" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="64" cy="64" r="60" fill="url(#headerGradient)"/>
+          <circle cx="64" cy="64" r="45" stroke="white" stroke-width="3" fill="none" opacity="0.3"/>
+          <circle cx="64" cy="64" r="30" stroke="white" stroke-width="3" fill="none" opacity="0.5"/>
+          <circle cx="64" cy="64" r="15" fill="white"/>
+          <path d="M 45 35 L 45 75 L 55 75 L 55 55 L 70 55 L 70 45 L 55 45 L 55 35 Z" fill="white" opacity="0.9"/>
+          <defs>
+            <linearGradient id="headerGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.2" />
+              <stop offset="100%" style="stop-color:#ffffff;stop-opacity:0.1" />
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
       <h1>Focufy</h1>
       <p class="subtitle">Stay focused, block distractions</p>
     </header>
