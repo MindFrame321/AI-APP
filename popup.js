@@ -820,20 +820,62 @@ async function signInWithGoogle() {
     showStatus('Signing in with Google...', 'success');
     
     // Check if chrome.identity is available
-    if (!chrome.identity || !chrome.identity.getAuthToken) {
+    if (!chrome.identity || !chrome.identity.launchWebAuthFlow) {
       throw new Error('Chrome Identity API not available. Make sure you\'re running as a Chrome extension.');
     }
     
-    console.log('Getting Google auth token...');
+    // Get the extension's redirect URL
+    const redirectUrl = chrome.identity.getRedirectURL();
+    console.log('Redirect URL:', redirectUrl);
     
-    // Use Chrome Identity API for Google sign-in (simpler and more reliable)
-    // No scopes needed - chrome.identity handles it automatically
-    const token = await chrome.identity.getAuthToken({ interactive: true });
+    // OAuth configuration - using Web application client
+    const clientId = '42484888880-r0rgoel8vrhmk5tsdtfibb0jot3vgksd.apps.googleusercontent.com';
+    const scopes = ['openid', 'email', 'profile'].join(' ');
     
-    console.log('Token received:', token ? 'yes' : 'no');
+    // Build the OAuth URL
+    const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    authUrl.searchParams.set('client_id', clientId);
+    authUrl.searchParams.set('redirect_uri', redirectUrl);
+    authUrl.searchParams.set('response_type', 'token');
+    authUrl.searchParams.set('scope', scopes);
+    authUrl.searchParams.set('prompt', 'select_account');
+    
+    console.log('Launching auth flow...');
+    
+    // Launch the OAuth flow
+    const responseUrl = await new Promise((resolve, reject) => {
+      chrome.identity.launchWebAuthFlow(
+        {
+          url: authUrl.toString(),
+          interactive: true
+        },
+        (callbackUrl) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else if (!callbackUrl) {
+            reject(new Error('Authentication was cancelled'));
+          } else {
+            resolve(callbackUrl);
+          }
+        }
+      );
+    });
+    
+    console.log('Auth flow completed, parsing response...');
+    
+    // Extract the access token from the callback URL
+    const urlHash = responseUrl.split('#')[1];
+    if (!urlHash) {
+      throw new Error('No token in response');
+    }
+    
+    const params = new URLSearchParams(urlHash);
+    const token = params.get('access_token');
     
     if (!token) {
-      throw new Error('Failed to get authentication token');
+      const error = params.get('error');
+      const errorDescription = params.get('error_description');
+      throw new Error(errorDescription || error || 'No access token received');
     }
     
     console.log('Got token! Fetching user info...');
