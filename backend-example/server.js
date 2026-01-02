@@ -47,6 +47,11 @@ const userUsage = new Map(); // userId -> { count: number, date: string }
 // userId -> { apiKey: string, createdAt: Date, lastUsed: Date, source: 'auto-generated' | 'user-provided' }
 const userApiKeys = new Map();
 
+// In-memory storage for support tickets (Use Database in production)
+// ticketId -> { ticketId, userId, userEmail, subject, message, status, createdAt, updatedAt, responses: [] }
+const supportTickets = new Map();
+let ticketCounter = 1;
+
 // Generate API key using Service Account (automatic, no user action needed)
 async function generateUserApiKeyWithServiceAccount(userId, userEmail) {
   try {
@@ -568,6 +573,183 @@ app.post('/api/analyze-page', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Proxy error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Support Ticket Endpoints
+// Create a new support ticket
+app.post('/api/support/tickets', authMiddleware, async (req, res) => {
+  try {
+    const { subject, message, category = 'general' } = req.body;
+    const userId = req.user.sub;
+    const userEmail = req.user.email;
+
+    if (!subject || !message) {
+      return res.status(400).json({ error: 'Subject and message are required' });
+    }
+
+    const ticketId = `TICKET-${Date.now()}-${ticketCounter++}`;
+    const ticket = {
+      ticketId,
+      userId,
+      userEmail,
+      subject,
+      message,
+      category,
+      status: 'open',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      responses: []
+    };
+
+    supportTickets.set(ticketId, ticket);
+    console.log(`✅ Support ticket created: ${ticketId} by ${userEmail}`);
+
+    res.status(201).json({
+      success: true,
+      ticket: {
+        ticketId: ticket.ticketId,
+        subject: ticket.subject,
+        status: ticket.status,
+        createdAt: ticket.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Ticket creation error:', error);
+    res.status(500).json({ error: 'Failed to create support ticket' });
+  }
+});
+
+// Get user's support tickets
+app.get('/api/support/tickets', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.sub;
+    const userTickets = Array.from(supportTickets.values())
+      .filter(ticket => ticket.userId === userId)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .map(ticket => ({
+        ticketId: ticket.ticketId,
+        subject: ticket.subject,
+        category: ticket.category,
+        status: ticket.status,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+        hasResponse: ticket.responses.length > 0
+      }));
+
+    res.json({
+      success: true,
+      tickets: userTickets
+    });
+  } catch (error) {
+    console.error('Get tickets error:', error);
+    res.status(500).json({ error: 'Failed to retrieve tickets' });
+  }
+});
+
+// Get a specific ticket
+app.get('/api/support/tickets/:ticketId', authMiddleware, async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const userId = req.user.sub;
+
+    const ticket = supportTickets.get(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    if (ticket.userId !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    res.json({
+      success: true,
+      ticket
+    });
+  } catch (error) {
+    console.error('Get ticket error:', error);
+    res.status(500).json({ error: 'Failed to retrieve ticket' });
+  }
+});
+
+// AI Support Chat Endpoint (enhanced)
+app.post('/api/support/chat', authMiddleware, async (req, res) => {
+  try {
+    const { message, conversationHistory = [] } = req.body;
+    const userId = req.user.sub;
+    const userEmail = req.user.email;
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    // Get user's API key
+    const userKey = userApiKeys.get(userId);
+    const apiKeyToUse = userKey ? userKey.apiKey : GEMINI_API_KEY;
+
+    if (!apiKeyToUse) {
+      return res.status(500).json({ error: 'API key not available' });
+    }
+
+    // Build context-aware prompt
+    const historyContext = conversationHistory
+      .slice(-5) // Last 5 messages for context
+      .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+      .join('\n');
+
+    const prompt = `You are Focufy's customer support AI assistant. Focufy is a Chrome extension that helps users stay focused by blocking distracting elements on websites using AI.
+
+${historyContext ? `Previous conversation:\n${historyContext}\n\n` : ''}User Question: "${message}"
+
+Answer the question helpfully and concisely. If the question is too complex or requires human assistance, suggest creating a support ticket.
+
+Common topics:
+- How to use Focufy
+- Setting up focus sessions
+- YouTube blocking
+- Premium features
+- Troubleshooting
+- Trial and subscriptions
+- API key issues
+- Backend configuration
+
+Keep responses under 200 words. Be friendly and helpful.`;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${apiKeyToUse}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 300
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error('AI API error');
+    }
+
+    const data = await response.json();
+    const aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || 
+      "I'm having trouble right now. Please create a support ticket for assistance.";
+
+    const needsHumanHelp = aiResponse.toLowerCase().includes('support ticket') ||
+                          aiResponse.toLowerCase().includes('create a ticket') ||
+                          aiResponse.toLowerCase().includes('contact support');
+
+    res.json({
+      success: true,
+      response: aiResponse.trim(),
+      needsHumanHelp
+    });
+  } catch (error) {
+    console.error('Chat error:', error);
+    res.status(500).json({ 
+      error: 'Failed to get AI response',
+      message: 'Please create a support ticket for assistance.'
+    });
   }
 });
 

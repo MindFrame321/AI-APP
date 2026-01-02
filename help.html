@@ -31,17 +31,65 @@
     </header>
 
     <div class="help-content">
+      <!-- Support Tabs -->
+      <div class="support-tabs">
+        <button class="tab-btn active" data-tab="chat">💬 AI Chat</button>
+        <button class="tab-btn" data-tab="ticket">🎫 Create Ticket</button>
+        <button class="tab-btn" data-tab="tickets">📋 My Tickets</button>
+      </div>
+
       <!-- AI Chat Bot -->
-      <div class="chat-section">
-        <h2>💬 Ask Focufy AI Assistant</h2>
-        <div class="chat-container">
-          <div id="chatMessages" class="chat-messages"></div>
-          <div class="chat-input-container">
-            <input type="text" id="chatInput" placeholder="Ask a question..." class="chat-input">
-            <button id="sendBtn" class="btn-send">Send</button>
+      <div id="chatTab" class="tab-content active">
+        <div class="chat-section">
+          <h2>💬 Ask Focufy AI Assistant</h2>
+          <div class="chat-container">
+            <div id="chatMessages" class="chat-messages"></div>
+            <div class="chat-input-container">
+              <input type="text" id="chatInput" placeholder="Ask a question..." class="chat-input">
+              <button id="sendBtn" class="btn-send">Send</button>
+            </div>
+          </div>
+          <p class="chat-note">Can't find an answer? Create a support ticket below.</p>
+        </div>
+      </div>
+
+      <!-- Create Support Ticket -->
+      <div id="ticketTab" class="tab-content">
+        <div class="ticket-section">
+          <h2>🎫 Create Support Ticket</h2>
+          <form id="ticketForm" class="ticket-form">
+            <div class="form-group">
+              <label for="ticketCategory">Category</label>
+              <select id="ticketCategory" class="form-input" required>
+                <option value="general">General Question</option>
+                <option value="technical">Technical Issue</option>
+                <option value="billing">Billing & Subscription</option>
+                <option value="feature">Feature Request</option>
+                <option value="bug">Bug Report</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="ticketSubject">Subject</label>
+              <input type="text" id="ticketSubject" class="form-input" placeholder="Brief description of your issue" required>
+            </div>
+            <div class="form-group">
+              <label for="ticketMessage">Message</label>
+              <textarea id="ticketMessage" class="form-input" rows="6" placeholder="Describe your issue in detail..." required></textarea>
+            </div>
+            <button type="submit" class="btn-primary">Submit Ticket</button>
+          </form>
+          <div id="ticketStatus" class="ticket-status hidden"></div>
+        </div>
+      </div>
+
+      <!-- My Tickets -->
+      <div id="ticketsTab" class="tab-content">
+        <div class="tickets-section">
+          <h2>📋 My Support Tickets</h2>
+          <div id="ticketsList" class="tickets-list">
+            <p class="loading-text">Loading your tickets...</p>
           </div>
         </div>
-        <p class="chat-note">Can't find an answer? Questions are forwarded to prithivponns@gmail.com</p>
       </div>
 
       <!-- FAQ Section -->
