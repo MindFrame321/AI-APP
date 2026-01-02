@@ -883,8 +883,9 @@ async function signInWithGoogle() {
       const redirectUrl = chrome.identity.getRedirectURL();
       console.log('Redirect URL:', redirectUrl);
       
-      // OAuth configuration - using Web application client
-      const clientId = '42484888880-r0rgoel8vrhmk5tsdtfibb0jot3vgksd.apps.googleusercontent.com';
+      // OAuth configuration - using Web application client (fallback only)
+      // Primary client ID is in manifest.json (Chrome Extension OAuth client)
+      const clientId = '42484888880-lpmdq3tm3btgsb793d1qj3hi62r1ffo0.apps.googleusercontent.com';
       const scopes = ['openid', 'email', 'profile'].join(' ');
       
       // Build the OAuth URL
