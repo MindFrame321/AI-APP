@@ -1039,7 +1039,7 @@ app.get('/admin/tickets', async (req, res) => {
         ${allTickets.length === 0 ? '<p>No tickets yet.</p>' : ''}
         
         ${allTickets.map(ticket => `
-          <div class="ticket">
+          <div class="ticket" id="ticket-${ticket.ticketId}">
             <div class="ticket-header">
               <div>
                 <div class="ticket-id">${ticket.ticketId}</div>
@@ -1053,6 +1053,35 @@ app.get('/admin/tickets', async (req, res) => {
               <span><strong>Created:</strong> ${new Date(ticket.createdAt).toLocaleString()}</span>
             </div>
             <div class="ticket-message">${ticket.message}</div>
+            
+            ${ticket.responses && ticket.responses.length > 0 ? `
+              <div class="responses-section">
+                <h3>Responses (${ticket.responses.length})</h3>
+                ${ticket.responses.map(response => `
+                  <div class="response-item">
+                    <div class="response-header">
+                      <strong>Admin</strong>
+                      <span class="response-date">${new Date(response.respondedAt).toLocaleString()}</span>
+                    </div>
+                    <div class="response-message">${response.message.replace(/\n/g, '<br>')}</div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+            
+            <div class="response-form">
+              <h3>Add Response</h3>
+              <textarea id="response-${ticket.ticketId}" class="response-textarea" placeholder="Type your response here..." rows="4"></textarea>
+              <div class="response-actions">
+                <select id="status-${ticket.ticketId}" class="status-select">
+                  <option value="open" ${ticket.status === 'open' ? 'selected' : ''}>Open</option>
+                  <option value="pending" ${ticket.status === 'pending' ? 'selected' : ''}>Pending</option>
+                  <option value="closed" ${ticket.status === 'closed' ? 'selected' : ''}>Closed</option>
+                </select>
+                <button onclick="submitResponse('${ticket.ticketId}')" class="submit-response-btn">Send Response</button>
+              </div>
+              <div id="response-status-${ticket.ticketId}" class="response-status"></div>
+            </div>
           </div>
         `).join('')}
       </div>
