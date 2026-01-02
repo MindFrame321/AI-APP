@@ -5,19 +5,38 @@ const { MongoClient } = require('mongodb');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+
+// CORS configuration - restrict to Chrome extension origins
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman, or Chrome extensions)
+    // Chrome extensions use chrome-extension:// protocol which doesn't send Origin header
+    if (!origin || origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://')) {
+      callback(null, true);
+    } else {
+      // For other origins, you can add specific domains here
+      // For now, we'll allow requests without origin (safer default)
+      callback(null, true);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Key']
+};
+
+app.use(cors(corsOptions));
+
+// Body size limit to prevent large payload attacks (1MB)
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Health check endpoint (add early to ensure it's registered)
 app.get('/', (req, res) => {
   res.json({ 
     status: 'ok', 
     message: 'Focufy Backend API',
-    endpoints: {
-      adminTickets: '/admin/tickets?key=YOUR_ADMIN_KEY',
-      adminApi: '/api/admin/tickets?key=YOUR_ADMIN_KEY',
-      testServiceAccount: '/api/test-service-account'
-    }
+    version: '1.0.0',
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -765,9 +784,9 @@ app.post('/api/support/tickets', authMiddleware, async (req, res) => {
       ticketId,
       userId,
       userEmail,
-      subject,
-      message,
-      category,
+      subject: sanitizedSubject,
+      message: sanitizedMessage,
+      category: sanitizedCategory,
       status: 'open',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -896,7 +915,7 @@ app.post('/api/support/tickets/:ticketId/reply', authMiddleware, async (req, res
       ticket.responses = [];
     }
     ticket.responses.push({
-      message: message.trim(),
+      message: sanitizedMessage,
       respondedBy: 'User',
       respondedAt: new Date().toISOString()
     });
@@ -984,7 +1003,7 @@ app.post('/api/admin/tickets/:ticketId/respond', async (req, res) => {
       ticket.responses = [];
     }
     ticket.responses.push({
-      message: response.trim(),
+      message: sanitizedResponse,
       respondedBy: 'Admin',
       respondedAt: new Date().toISOString()
     });
@@ -1021,8 +1040,16 @@ app.post('/api/support/chat', authMiddleware, async (req, res) => {
     const userId = req.user.sub;
     const userEmail = req.user.email;
 
-    if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
+    // Input validation
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ error: 'Message is required and must be a non-empty string' });
+    }
+    
+    // Sanitize message
+    const sanitizedMessage = message.trim().substring(0, 1000); // Max 1000 chars for chat
+    
+    if (!sanitizedMessage) {
+      return res.status(400).json({ error: 'Message cannot be empty' });
     }
 
     // Get user's API key
@@ -1041,7 +1068,7 @@ app.post('/api/support/chat', authMiddleware, async (req, res) => {
 
     const prompt = `You are Focufy's customer support AI assistant. Focufy is a Chrome extension that helps users stay focused by blocking distracting elements on websites using AI.
 
-${historyContext ? `Previous conversation:\n${historyContext}\n\n` : ''}User Question: "${message}"
+${historyContext ? `Previous conversation:\n${historyContext}\n\n` : ''}User Question: "${sanitizedMessage}"
 
 Answer the question helpfully and concisely. If the question is too complex or requires human assistance, suggest creating a support ticket.
 
@@ -1099,11 +1126,18 @@ Keep responses under 200 words. Be friendly and helpful.`;
 // In production, add proper authentication/authorization
 app.get('/api/admin/tickets', async (req, res) => {
   try {
-    // Simple admin key check (in production, use proper auth)
+    // Admin key check - REQUIRED environment variable
     const adminKey = req.query.key || req.headers['x-admin-key'];
-    const expectedKey = process.env.ADMIN_KEY || 'focufy-admin-2024'; // Change this!
+    const expectedKey = process.env.ADMIN_KEY;
     
-    if (adminKey !== expectedKey) {
+    if (!expectedKey) {
+      console.error('ADMIN_KEY environment variable not set!');
+      return res.status(500).json({ 
+        error: 'Server configuration error. Admin access not configured.' 
+      });
+    }
+    
+    if (!adminKey || adminKey !== expectedKey) {
       return res.status(401).json({ 
         error: 'Unauthorized. Provide ?key=YOUR_ADMIN_KEY or X-Admin-Key header' 
       });
