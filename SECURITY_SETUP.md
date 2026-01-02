@@ -13,33 +13,94 @@ This guide covers setting up Cloudflare protection and implementing security bes
 ## Cloudflare Setup (Free Tier)
 
 ### Step 1: Create Cloudflare Account
-1. Go to https://dash.cloudflare.com/sign-up
-2. Sign up for a free account (no credit card required)
-3. Verify your email
+1. Go to **https://dash.cloudflare.com/sign-up**
+2. Enter your email address and create a password
+3. Click "Sign up" (no credit card required for free tier)
+4. Check your email and click the verification link
+5. You'll be redirected to the Cloudflare dashboard
 
-### Step 2: Add Your Domain
-1. In Cloudflare dashboard, click "Add a Site"
-2. Enter your Render domain: `focufy-extension-1.onrender.com`
-3. Select the **Free** plan
-4. Click "Continue"
+### Step 2: Add Your Render Site to Cloudflare
 
-### Step 3: Configure DNS
-1. Cloudflare will scan your DNS records
-2. For Render, you'll need to add a CNAME record:
-   - **Type**: CNAME
-   - **Name**: @ (or your subdomain)
-   - **Target**: `focufy-extension-1.onrender.com`
-   - **Proxy status**: Proxied (orange cloud) ✅
-3. Click "Continue"
+**Important Note**: Cloudflare typically works with custom domains, not subdomains from hosting providers like Render. However, we can still use Cloudflare's security features. Here are your options:
 
-### Step 4: Update Nameservers (If Using Custom Domain)
-If you're using a custom domain (not just Render's domain):
-1. Copy the nameservers Cloudflare provides
-2. Go to your domain registrar
-3. Update nameservers to Cloudflare's
-4. Wait for DNS propagation (usually 5-30 minutes)
+#### Option A: Using Render's Domain (Simpler - Recommended for Now)
 
-### Step 5: Enable Security Features
+Since `focufy-extension-1.onrender.com` is a Render subdomain, Cloudflare cannot proxy it directly. However, you can still use Cloudflare's security features through their API or wait until you have a custom domain.
+
+**For now, skip Cloudflare setup** and rely on the security improvements we've made in the code. You can add Cloudflare later when you get a custom domain.
+
+#### Option B: Using a Custom Domain (Better Long-term)
+
+If you have a custom domain (e.g., `focufy.com` or `focufy.app`):
+
+1. **In Cloudflare Dashboard:**
+   - Click the **"Add a Site"** button (big blue button at the top)
+   - Enter your custom domain (e.g., `focufy.com`)
+   - Click **"Add site"**
+   - Select the **Free** plan
+   - Click **"Continue"**
+
+2. **Cloudflare will scan your DNS:**
+   - Wait for Cloudflare to scan your existing DNS records
+   - This usually takes 30-60 seconds
+   - You'll see a list of your current DNS records
+
+3. **Configure DNS Records:**
+   - Cloudflare will show your existing DNS records
+   - Make sure the **Proxy status** is **Proxied** (orange cloud ☁️) for your main domain
+   - If you need to add a CNAME for your Render service:
+     - Click **"Add record"**
+     - **Type**: CNAME
+     - **Name**: `api` (or `www` or `@` for root)
+     - **Target**: `focufy-extension-1.onrender.com`
+     - **Proxy status**: Proxied (orange cloud) ☁️
+     - Click **"Save"**
+
+4. **Update Nameservers:**
+   - Cloudflare will show you two nameservers (e.g., `alice.ns.cloudflare.com` and `bob.ns.cloudflare.com`)
+   - **Copy both nameservers**
+   - Go to your domain registrar (where you bought the domain - GoDaddy, Namecheap, etc.)
+   - Find your domain's DNS settings
+   - Replace the existing nameservers with Cloudflare's nameservers
+   - Save the changes
+   - Wait for DNS propagation (5-30 minutes, sometimes up to 48 hours)
+
+5. **Back in Cloudflare:**
+   - Click **"Continue"** after updating nameservers
+   - Cloudflare will verify the nameservers
+   - Once verified, your site will be active on Cloudflare
+
+### Step 3: Point Your Domain to Render
+
+After Cloudflare is set up, you need to point your domain to Render:
+
+1. **In Cloudflare Dashboard:**
+   - Go to **DNS** → **Records**
+   - Add or edit a CNAME record:
+     - **Type**: CNAME
+     - **Name**: `api` (or whatever subdomain you want)
+     - **Target**: `focufy-extension-1.onrender.com`
+     - **Proxy status**: Proxied ☁️
+     - Click **"Save"**
+
+2. **In Render Dashboard:**
+   - Go to your service settings
+   - Add your custom domain
+   - Render will provide instructions for DNS configuration
+   - Use the CNAME record from Cloudflare
+
+### Step 4: Verify Setup
+
+1. Wait 5-30 minutes for DNS to propagate
+2. Test your domain: `https://api.yourdomain.com` (or whatever you configured)
+3. It should load your Render service through Cloudflare
+4. Check that the SSL certificate is active (lock icon in browser)
+
+### Step 5: Enable Security Features (After Domain is Active)
+
+**Note**: These steps only work if you've set up a custom domain. If you're using Render's domain directly, skip to the "Alternative: Security Without Custom Domain" section below.
+
+Once your domain is active on Cloudflare:
 1. Go to **Security** → **WAF** (Web Application Firewall)
 2. Enable **Managed Rules**:
    - ✅ Cloudflare Managed Ruleset
