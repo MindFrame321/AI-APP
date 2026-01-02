@@ -1096,8 +1096,11 @@ app.get('/admin/tickets', async (req, res) => {
         .responses-section { margin-top: 20px; padding-top: 20px; border-top: 2px solid #e2e8f0; margin-bottom: 20px; }
         .responses-section h3 { font-size: 16px; color: #1e293b; margin-bottom: 15px; }
         .response-item { background: white; padding: 15px; border-radius: 6px; border-left: 3px solid #10b981; margin-bottom: 10px; }
+        .response-item.user-response { background: #eff6ff; border-left-color: #3b82f6; }
+        .response-item.admin-response { background: #f0fdf4; border-left-color: #10b981; }
         .response-header { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; }
         .response-header strong { color: #10b981; }
+        .user-response .response-header strong { color: #3b82f6; }
         .response-date { color: #64748b; }
         .response-message { color: #1e293b; white-space: pre-wrap; }
         .response-form { margin-top: 30px; padding: 20px; border-top: 3px solid #10b981; background: #f0fdf4; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
