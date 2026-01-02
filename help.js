@@ -288,7 +288,7 @@ async function loadTickets() {
     }
 
     ticketsList.innerHTML = data.tickets.map(ticket => `
-      <div class="ticket-card" onclick="viewTicketDetails('${ticket.ticketId}')" style="cursor: pointer;">
+      <div class="ticket-card" data-ticket-id="${ticket.ticketId}" style="cursor: pointer;">
         <div class="ticket-header">
           <div class="ticket-id">${ticket.ticketId}</div>
           <span class="ticket-status-badge status-${ticket.status}">${ticket.status.toUpperCase()}</span>
@@ -301,6 +301,16 @@ async function loadTickets() {
         </div>
       </div>
     `).join('');
+    
+    // Add click event listeners to all ticket cards
+    ticketsList.querySelectorAll('.ticket-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        const ticketId = card.getAttribute('data-ticket-id');
+        if (ticketId) {
+          viewTicketDetails(ticketId);
+        }
+      });
+    });
   } catch (error) {
     ticketsList.innerHTML = '<p class="error-text">Failed to load tickets. Please try again later.</p>';
     console.error('Load tickets error:', error);
