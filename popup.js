@@ -971,10 +971,10 @@ async function signInWithGoogle() {
     console.error('Google sign-in error:', error);
     let errorMessage = 'Sign-in failed. ';
     
-    if (error.message.includes('redirect_uri_mismatch') || error.message.includes('invalid_request')) {
+    if (error.message.includes('redirect_uri_mismatch') || error.message.includes('invalid_request') || error.message.includes('flowName=GeneralOAuthFlow')) {
       const redirectUrl = chrome.identity ? chrome.identity.getRedirectURL() : 'unknown';
-      errorMessage = `Please add this redirect URI to Google Cloud Console:\n${redirectUrl}\n\nGo to: APIs & Services → Credentials → Edit your OAuth client → Authorized redirect URIs`;
-      console.error('Add this redirect URI to Google Cloud Console:', redirectUrl);
+      errorMessage = `OAuth client type mismatch!\n\nYour OAuth client is set as "Web application" which requires manual setup.\n\nSOLUTION: Create a "Chrome App" OAuth client instead.\n\n1. Go to Google Cloud Console → Credentials\n2. Create new OAuth client → Select "Chrome App"\n3. Update manifest.json with the new client ID\n\nSee OAUTH_CLIENT_SETUP.md for detailed instructions.\n\nCurrent redirect URI: ${redirectUrl}`;
+      console.error('OAuth client type issue. Create a Chrome App OAuth client. Redirect URI:', redirectUrl);
     } else if (error.message.includes('OAuth2') || error.message.includes('invalid_client')) {
       errorMessage += 'OAuth configuration error. Please check the extension\'s OAuth client ID in manifest.json.';
     } else if (error.message.includes('access_denied')) {
