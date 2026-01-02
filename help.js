@@ -362,19 +362,27 @@ async function viewTicketDetails(ticketId) {
     }
 
     console.log('Fetching ticket from:', `${backendUrl}/api/support/tickets/${ticketId}`);
-    const response = await fetch(`${backendUrl}/api/support/tickets/${ticketId}`, {
+    const response = await fetch(`${backendUrl}/api/support/tickets/${encodeURIComponent(ticketId)}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${result.authToken}`
       }
     });
 
+    const data = await response.json();
+    
     if (!response.ok) {
-      throw new Error('Failed to load ticket details');
+      const errorMessage = data.error || 'Failed to load ticket details';
+      console.error('Ticket fetch error:', response.status, errorMessage);
+      throw new Error(errorMessage);
     }
 
-    const data = await response.json();
+    if (!data.ticket) {
+      throw new Error('Ticket data not found in response');
+    }
+
     const ticket = data.ticket;
+    console.log('Ticket loaded successfully:', ticket.ticketId);
 
     // Create modal to show ticket details
     showTicketModal(ticket);

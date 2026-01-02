@@ -749,15 +749,23 @@ app.get('/api/support/tickets/:ticketId', authMiddleware, async (req, res) => {
     const { ticketId } = req.params;
     const userId = req.user.sub;
 
+    console.log(`[Get Ticket] Looking for ticket: ${ticketId}, User: ${userId}`);
+    console.log(`[Get Ticket] Total tickets in store: ${supportTickets.size}`);
+    console.log(`[Get Ticket] Ticket IDs in store:`, Array.from(supportTickets.keys()));
+
     const ticket = supportTickets.get(ticketId);
     if (!ticket) {
+      console.log(`[Get Ticket] Ticket ${ticketId} not found in store`);
       return res.status(404).json({ error: 'Ticket not found' });
     }
 
+    console.log(`[Get Ticket] Found ticket, userId: ${ticket.userId}, requesting userId: ${userId}`);
     if (ticket.userId !== userId) {
+      console.log(`[Get Ticket] Access denied - userId mismatch`);
       return res.status(403).json({ error: 'Access denied' });
     }
 
+    console.log(`[Get Ticket] Returning ticket ${ticketId} successfully`);
     res.json({
       success: true,
       ticket
