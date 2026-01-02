@@ -990,6 +990,18 @@ app.get('/admin/tickets', async (req, res) => {
   `;
 
   res.send(html);
+  } catch (error) {
+    console.error('Admin tickets page error:', error);
+    res.status(500).send(`
+      <html>
+        <head><title>Error</title></head>
+        <body style="font-family: Arial; padding: 40px; text-align: center;">
+          <h1>❌ Error</h1>
+          <p>Failed to load tickets. Please try again later.</p>
+        </body>
+      </html>
+    `);
+  }
 });
 
 const PORT = process.env.PORT || 10000;
