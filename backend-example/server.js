@@ -12,6 +12,7 @@ const GOOGLE_CLIENT_ID = '42484888880-r0rgoel8vrhmk5tsdtfibb0jot3vgksd.apps.goog
 const GOOGLE_CLOUD_PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID; // Your Google Cloud Project ID
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY; // Fallback API key (if auto-generation fails)
 const DAILY_LIMIT_PER_USER = 1000; // High limit (effectively unlimited per user)
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'prithivponns@gmail.com'; // Support email to receive tickets
 
 // Initialize Google Auth for Service Account (REQUIRED for automatic key generation)
 let serviceAccountAuth = null;
@@ -51,6 +52,82 @@ const userApiKeys = new Map();
 // ticketId -> { ticketId, userId, userEmail, subject, message, status, createdAt, updatedAt, responses: [] }
 const supportTickets = new Map();
 let ticketCounter = 1;
+
+// Send email notification for new support ticket
+async function sendTicketEmailNotification(ticket) {
+  try {
+    // Format email content
+    const emailSubject = `[Focufy Support] ${ticket.ticketId}: ${ticket.subject}`;
+    const emailBody = `
+New Support Ticket Received
+
+Ticket ID: ${ticket.ticketId}
+Category: ${ticket.category}
+Status: ${ticket.status}
+Created: ${new Date(ticket.createdAt).toLocaleString()}
+
+User Email: ${ticket.userEmail}
+User ID: ${ticket.userId}
+
+Subject: ${ticket.subject}
+
+Message:
+${ticket.message}
+
+---
+View all tickets in the backend logs or implement a dashboard to manage tickets.
+Reply to this email or update the ticket status via the API.
+    `.trim();
+
+    // Try to send email via Resend API (if configured)
+    if (process.env.RESEND_API_KEY) {
+      try {
+        const resendResponse = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            from: process.env.RESEND_FROM_EMAIL || 'Focufy Support <onboarding@resend.dev>',
+            to: [SUPPORT_EMAIL],
+            subject: emailSubject,
+            text: emailBody,
+            reply_to: ticket.userEmail // So you can reply directly
+          })
+        });
+
+        if (resendResponse.ok) {
+          const result = await resendResponse.json();
+          console.log(`📧 Ticket email sent successfully via Resend to ${SUPPORT_EMAIL} (ID: ${result.id})`);
+          return; // Success, don't log to console
+        } else {
+          const error = await resendResponse.text();
+          console.warn('Resend API error:', error);
+          // Fall through to console logging
+        }
+      } catch (resendError) {
+        console.warn('Resend API request failed:', resendError.message);
+        // Fall through to console logging
+      }
+    }
+
+    // Fallback: Log to console (visible in Render logs)
+    console.log('\n' + '='.repeat(80));
+    console.log('📧 NEW SUPPORT TICKET - EMAIL NOTIFICATION');
+    console.log('='.repeat(80));
+    console.log(`To: ${SUPPORT_EMAIL}`);
+    console.log(`Subject: ${emailSubject}`);
+    console.log('\n' + emailBody);
+    console.log('='.repeat(80) + '\n');
+    console.log('💡 To receive tickets via email, add RESEND_API_KEY to your environment variables.');
+    console.log('   Sign up at https://resend.com (free tier available)\n');
+    
+  } catch (error) {
+    console.error('Error sending ticket email notification:', error);
+    // Don't throw - email failure shouldn't break ticket creation
+  }
+}
 
 // Generate API key using Service Account (automatic, no user action needed)
 async function generateUserApiKeyWithServiceAccount(userId, userEmail) {
@@ -604,6 +681,12 @@ app.post('/api/support/tickets', authMiddleware, async (req, res) => {
 
     supportTickets.set(ticketId, ticket);
     console.log(`✅ Support ticket created: ${ticketId} by ${userEmail}`);
+
+    // Send email notification (async, don't wait for it)
+    sendTicketEmailNotification(ticket).catch(err => {
+      console.error('Failed to send ticket email notification:', err);
+      // Don't fail the request if email fails
+    });
 
     res.status(201).json({
       success: true,
