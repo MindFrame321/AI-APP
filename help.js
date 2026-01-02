@@ -340,3 +340,122 @@ function removeTypingIndicator(id) {
   const typing = document.getElementById(id);
   if (typing) typing.remove();
 }
+
+// View full ticket details including responses
+async function viewTicketDetails(ticketId) {
+  try {
+    const result = await chrome.storage.local.get(['authToken', 'user']);
+    if (!result.authToken || !result.user) {
+      alert('Please sign in with Google to view ticket details.');
+      return;
+    }
+
+    const response = await fetch(`${backendUrl}/api/support/tickets/${ticketId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${result.authToken}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to load ticket details');
+    }
+
+    const data = await response.json();
+    const ticket = data.ticket;
+
+    // Create modal to show ticket details
+    showTicketModal(ticket);
+  } catch (error) {
+    console.error('View ticket error:', error);
+    alert('Failed to load ticket details: ' + error.message);
+  }
+}
+
+// Show ticket details in a modal
+function showTicketModal(ticket) {
+  // Remove existing modal if any
+  const existingModal = document.getElementById('ticketModal');
+  if (existingModal) {
+    existingModal.remove();
+  }
+
+  const modal = document.createElement('div');
+  modal.id = 'ticketModal';
+  modal.className = 'ticket-modal';
+  modal.innerHTML = `
+    <div class="ticket-modal-content">
+      <div class="ticket-modal-header">
+        <h2>Ticket Details</h2>
+        <button class="ticket-modal-close" onclick="closeTicketModal()">×</button>
+      </div>
+      <div class="ticket-modal-body">
+        <div class="ticket-detail-section">
+          <div class="ticket-detail-row">
+            <strong>Ticket ID:</strong> <span class="ticket-id-text">${ticket.ticketId}</span>
+          </div>
+          <div class="ticket-detail-row">
+            <strong>Status:</strong> <span class="ticket-status-badge status-${ticket.status}">${ticket.status.toUpperCase()}</span>
+          </div>
+          <div class="ticket-detail-row">
+            <strong>Category:</strong> ${ticket.category}
+          </div>
+          <div class="ticket-detail-row">
+            <strong>Created:</strong> ${new Date(ticket.createdAt).toLocaleString()}
+          </div>
+          <div class="ticket-detail-row">
+            <strong>Last Updated:</strong> ${new Date(ticket.updatedAt).toLocaleString()}
+          </div>
+        </div>
+
+        <div class="ticket-detail-section">
+          <h3>Your Message</h3>
+          <div class="ticket-message-box">${ticket.message.replace(/\n/g, '<br>')}</div>
+        </div>
+
+        ${ticket.responses && ticket.responses.length > 0 ? `
+          <div class="ticket-detail-section">
+            <h3>Responses (${ticket.responses.length})</h3>
+            ${ticket.responses.map((response, idx) => `
+              <div class="ticket-response-box">
+                <div class="response-header">
+                  <strong>Admin Response #${idx + 1}</strong>
+                  <span class="response-date">${new Date(response.respondedAt).toLocaleString()}</span>
+                </div>
+                <div class="response-message">${response.message.replace(/\n/g, '<br>')}</div>
+              </div>
+            `).join('')}
+          </div>
+        ` : `
+          <div class="ticket-detail-section">
+            <p class="no-response-text">No responses yet. We'll get back to you soon!</p>
+          </div>
+        `}
+      </div>
+      <div class="ticket-modal-footer">
+        <button class="btn-primary" onclick="closeTicketModal()">Close</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  
+  // Close on outside click
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      closeTicketModal();
+    }
+  });
+}
+
+// Close ticket modal
+function closeTicketModal() {
+  const modal = document.getElementById('ticketModal');
+  if (modal) {
+    modal.remove();
+  }
+}
+
+// Make functions global for onclick handlers
+window.viewTicketDetails = viewTicketDetails;
+window.closeTicketModal = closeTicketModal;
