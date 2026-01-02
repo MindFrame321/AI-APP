@@ -1151,11 +1151,11 @@ app.get('/admin/tickets', async (req, res) => {
             
             ${ticket.responses && ticket.responses.length > 0 ? `
               <div class="responses-section">
-                <h3>Responses (${ticket.responses.length})</h3>
+                <h3>Conversation (${ticket.responses.length})</h3>
                 ${ticket.responses.map(response => `
-                  <div class="response-item">
+                  <div class="response-item ${response.respondedBy === 'User' ? 'user-response' : 'admin-response'}">
                     <div class="response-header">
-                      <strong>Admin</strong>
+                      <strong>${response.respondedBy === 'User' ? '👤 User' : '👨‍💼 Admin'}</strong>
                       <span class="response-date">${new Date(response.respondedAt).toLocaleString()}</span>
                     </div>
                     <div class="response-message">${response.message.replace(/\n/g, '<br>')}</div>
