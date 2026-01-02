@@ -369,15 +369,29 @@ async function viewTicketDetails(ticketId) {
       }
     });
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      console.error('Failed to parse response:', parseError);
+      const text = await response.text();
+      console.error('Response text:', text);
+      throw new Error('Invalid response from server. The server may have restarted and lost ticket data.');
+    }
     
     if (!response.ok) {
       const errorMessage = data.error || 'Failed to load ticket details';
       console.error('Ticket fetch error:', response.status, errorMessage);
+      
+      if (response.status === 404) {
+        throw new Error('Ticket not found. The server may have restarted. Please create a new ticket if needed.');
+      }
+      
       throw new Error(errorMessage);
     }
 
     if (!data.ticket) {
+      console.error('Response data:', data);
       throw new Error('Ticket data not found in response');
     }
 
