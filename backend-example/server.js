@@ -878,21 +878,36 @@ app.get('/api/admin/tickets', async (req, res) => {
 
 // Simple HTML page to view tickets (admin dashboard)
 app.get('/admin/tickets', async (req, res) => {
-  const adminKey = req.query.key;
-  const expectedKey = process.env.ADMIN_KEY || 'focufy-admin-2024';
-  
-  if (adminKey !== expectedKey) {
-    return res.status(401).send(`
-      <html>
-        <head><title>Focufy Admin - Unauthorized</title></head>
-        <body style="font-family: Arial; padding: 40px; text-align: center;">
-          <h1>🔒 Unauthorized</h1>
-          <p>Please provide the admin key: <code>?key=YOUR_ADMIN_KEY</code></p>
-          <p>Or set ADMIN_KEY environment variable and use that value.</p>
+  try {
+    const adminKey = req.query.key;
+    const expectedKey = process.env.ADMIN_KEY || 'focufy-admin-2024';
+    
+    if (!adminKey || adminKey !== expectedKey) {
+      return res.status(401).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Focufy Admin - Unauthorized</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 40px; text-align: center; background: #f5f5f5; }
+            .container { max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+            h1 { color: #dc2626; }
+            code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>🔒 Unauthorized</h1>
+            <p>Please provide the admin key in the URL:</p>
+            <p><code>?key=focufy-admin-2024</code></p>
+            <p style="margin-top: 20px; color: #64748b; font-size: 14px;">
+              Or set <code>ADMIN_KEY</code> environment variable in Render and use that value.
+            </p>
+          </div>
         </body>
-      </html>
-    `);
-  }
+        </html>
+      `);
+    }
 
   const allTickets = Array.from(supportTickets.values())
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -962,6 +977,18 @@ app.get('/admin/tickets', async (req, res) => {
   `;
 
   res.send(html);
+});
+
+// Health check endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    message: 'Focufy Backend API',
+    endpoints: {
+      adminTickets: '/admin/tickets?key=YOUR_ADMIN_KEY',
+      adminApi: '/api/admin/tickets?key=YOUR_ADMIN_KEY'
+    }
+  });
 });
 
 const PORT = process.env.PORT || 3000;
