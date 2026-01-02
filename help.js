@@ -558,12 +558,12 @@ function showTicketModal(ticket) {
   };
   document.addEventListener('keydown', escapeHandler);
   
-  // Add reply functionality
+  // Add reply functionality (only if ticket is not closed)
   const submitReplyBtn = modal.querySelector('#submitReplyBtn');
   const replyTextarea = modal.querySelector('#userReplyText');
   const replyStatus = modal.querySelector('#replyStatus');
   
-  if (submitReplyBtn && replyTextarea) {
+  if (submitReplyBtn && replyTextarea && ticket.status !== 'closed') {
     submitReplyBtn.addEventListener('click', async () => {
       const message = replyTextarea.value.trim();
       if (!message) {
