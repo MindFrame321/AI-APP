@@ -590,6 +590,55 @@ header h1 {
   font-weight: 600;
 }
 
+.oauth-client-id-section {
+  margin: 20px 0;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.oauth-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #495057;
+  margin-bottom: 8px;
+}
+
+.oauth-hint {
+  display: block;
+  font-size: 11px;
+  color: #6c757d;
+  font-weight: normal;
+  margin-top: 4px;
+}
+
+.oauth-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  background: white;
+  color: #212529;
+  transition: border-color 0.2s;
+}
+
+.oauth-input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.oauth-help {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #6c757d;
+  line-height: 1.4;
+}
+
 .login-subtitle {
   font-size: 14px;
   color: #64748b;

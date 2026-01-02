@@ -23,13 +23,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Check if user is authenticated
 async function checkAuthStatus() {
   try {
-    const result = await chrome.storage.local.get(['user']);
+    const result = await chrome.storage.local.get(['user', 'oauthClientId']);
     if (result.user && result.user.email) {
       await showUserProfile(result.user);
       hideLoginScreen();
     } else {
       showLoginScreen();
       hideUserProfile();
+    }
+    
+    // Load saved OAuth client ID if exists
+    if (result.oauthClientId) {
+      const clientIdInput = document.getElementById('oauthClientId');
+      if (clientIdInput) {
+        clientIdInput.value = result.oauthClientId;
+      }
     }
   } catch (error) {
     console.error('Error checking auth:', error);
@@ -222,6 +230,18 @@ function setupEventListeners() {
       return false;
     };
     console.log('✅ Logout button listener attached');
+  }
+  
+  // OAuth Client ID input - save on blur
+  const oauthClientIdInput = document.getElementById('oauthClientId');
+  if (oauthClientIdInput) {
+    oauthClientIdInput.addEventListener('blur', async (e) => {
+      const clientId = e.target.value.trim();
+      if (clientId) {
+        await chrome.storage.local.set({ oauthClientId: clientId });
+        console.log('OAuth Client ID saved:', clientId);
+      }
+    });
   }
   
   // Session buttons
@@ -815,6 +835,8 @@ function showStatus(message, type) {
 
 // Sign in with Google
 async function signInWithGoogle() {
+  let clientId = ''; // Declare outside try block for error handler access
+  
   try {
     console.log('=== signInWithGoogle CALLED ===');
     showStatus('Signing in with Google...', 'success');
@@ -824,10 +846,29 @@ async function signInWithGoogle() {
       throw new Error('Chrome Identity API not available. Make sure you\'re running as a Chrome extension.');
     }
     
+    // Get OAuth client ID from input or storage, fallback to default
+    const clientIdInput = document.getElementById('oauthClientId');
+    clientId = clientIdInput?.value?.trim() || '';
+    
+    // Try to get from storage if input is empty
+    if (!clientId) {
+      const result = await chrome.storage.local.get(['oauthClientId']);
+      clientId = result.oauthClientId || '';
+    }
+    
+    // Fallback to default if still empty
+    if (!clientId) {
+      clientId = '42484888880-o3h9svrq1cp5u53hhlrooeohmin89pci.apps.googleusercontent.com';
+    }
+    
+    // Save the client ID to storage for future use
+    if (clientIdInput?.value?.trim()) {
+      await chrome.storage.local.set({ oauthClientId: clientIdInput.value.trim() });
+    }
+    
     // Use chrome.identity.launchWebAuthFlow for Web application OAuth clients
     const extensionId = chrome.runtime.id;
     const redirectUri = chrome.identity.getRedirectURL();
-    const clientId = '42484888880-6i52q4ace7u3nj3mt0bvruj4osndltik.apps.googleusercontent.com';
     const scopes = [
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile'
@@ -836,9 +877,30 @@ async function signInWithGoogle() {
     console.log('=== OAuth Debug Info ===');
     console.log('Extension ID:', extensionId);
     console.log('Redirect URI:', redirectUri);
-    console.log('⚠️ IMPORTANT: Add this exact redirect URI to your OAuth client in Google Cloud Console!');
+    console.log('⚠️ COPY THIS REDIRECT URI AND ADD IT TO YOUR OAUTH CLIENT!');
     console.log('Client ID:', clientId);
-    console.log('Using launchWebAuthFlow for Web application client');
+    
+    // Show the redirect URI prominently in console and status
+    console.log('═══════════════════════════════════════════════════════');
+    console.log('⚠️  REQUIRED: Add this redirect URI to your OAuth client:');
+    console.log('═══════════════════════════════════════════════════════');
+    console.log(redirectUri);
+    console.log('═══════════════════════════════════════════════════════');
+    console.log('Steps:');
+    console.log('1. Go to: https://console.cloud.google.com/apis/credentials');
+    console.log(`2. Click on client: ${clientId}`);
+    console.log(`3. Under "Authorized redirect URIs", add: ${redirectUri}`);
+    console.log('4. Click SAVE');
+    console.log('5. Wait 2-3 minutes, then try again');
+    console.log('═══════════════════════════════════════════════════════');
+    console.log(`Using Client ID: ${clientId}`);
+    
+    // Show in status message for visibility (but don't block if client ID is set)
+    if (!clientIdInput?.value?.trim()) {
+      showStatus(`⚠️ Add redirect URI first!\n\n${redirectUri}\n\nSee console (F12) for steps`, 'error');
+      // Small delay to let user see the message
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
     
     // Build OAuth URL
     const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
@@ -847,8 +909,6 @@ async function signInWithGoogle() {
     authUrl.searchParams.set('response_type', 'token');
     authUrl.searchParams.set('scope', scopes);
     authUrl.searchParams.set('access_type', 'online');
-    
-    console.log('Full auth URL:', authUrl.toString());
     
     const token = await new Promise((resolve, reject) => {
       chrome.identity.launchWebAuthFlow(
@@ -860,19 +920,27 @@ async function signInWithGoogle() {
           if (chrome.runtime.lastError) {
             const error = chrome.runtime.lastError.message;
             console.error('launchWebAuthFlow error:', error);
-            reject(new Error(error));
+            console.error('Full error:', chrome.runtime.lastError);
+            
+            // If redirect_uri_mismatch, show helpful message
+            if (error.includes('redirect_uri_mismatch') || error.includes('invalid_request')) {
+              const helpMessage = `Redirect URI mismatch!\n\nYour redirect URI: ${redirectUri}\n\nAdd this to your OAuth client:\n1. Go to Google Cloud Console\n2. Open OAuth client: ${clientId}\n3. Add redirect URI: ${redirectUri}\n4. Save and try again`;
+              console.error(helpMessage);
+              reject(new Error(`Redirect URI not configured. Add this to OAuth client: ${redirectUri}`));
+            } else {
+              reject(new Error(error));
+            }
           } else if (!responseUrl) {
             reject(new Error('Authentication was cancelled or failed'));
           } else {
             // Extract token from response URL
-            // Format: https://<extension-id>.chromiumapp.org/#access_token=...
             const url = new URL(responseUrl);
             const hash = url.hash.substring(1);
             const params = new URLSearchParams(hash);
             const accessToken = params.get('access_token');
             
             if (accessToken) {
-              console.log('✅ Successfully got auth token');
+              console.log('✅ TOKEN OK - Successfully got auth token');
               resolve(accessToken);
             } else {
               const error = params.get('error') || 'No access token in response';
@@ -930,19 +998,28 @@ async function signInWithGoogle() {
       console.error('chrome.runtime.lastError:', chrome.runtime.lastError.message);
     }
     
-    if (error.message.includes('invalid_request') || error.message.includes('Custom scheme') || error.message.includes('invalid_client') || error.message.includes('did not approve')) {
-      const setupUrl = 'https://console.cloud.google.com/apis/credentials';
-      const consentUrl = 'https://console.cloud.google.com/apis/credentials/consent';
+    if (error.message.includes('redirect_uri_mismatch') || error.message.includes('Redirect URI not configured')) {
       const extensionId = chrome.runtime.id;
+      const redirectUri = chrome.identity.getRedirectURL();
+      const setupUrl = 'https://console.cloud.google.com/apis/credentials';
       
-      errorMessage = `❌ OAuth Configuration Error\n\nCRITICAL: Your OAuth client MUST be "Chrome Extension" type, NOT "Web application".\n\n✅ STEP-BY-STEP FIX:\n\n1. Go to: ${setupUrl}\n2. Find client ID: 42484888880-lpmdq3tm3btgsb793d1qj3hi62r1ffo0\n3. CHECK: Application type MUST be "Chrome Extension"\n   ❌ If it says "Web application", DELETE it and create a new one\n4. Go to: ${consentUrl}\n5. Add these EXACT scopes:\n   - https://www.googleapis.com/auth/userinfo.email\n   - https://www.googleapis.com/auth/userinfo.profile\n   - openid\n6. Add your email (prithivponns@gmail.com) as a test user\n7. Save and wait 10-15 minutes\n\nExtension ID: ${extensionId}\n(Optional: Add this to OAuth client)\n\nCurrent client ID: 42484888880-koptahm8l3tobtko6eqg75c5g5qbm17u.apps.googleusercontent.com`;
+      errorMessage = `❌ Redirect URI Not Configured\n\nYour Extension ID: ${extensionId}\nYour Redirect URI: ${redirectUri}\nYour Client ID: ${clientId || 'Not set'}\n\n✅ SOLUTION:\n1. Go to: ${setupUrl}\n2. Click on OAuth client: ${clientId || 'YOUR_CLIENT_ID'}\n3. Under "Authorized redirect URIs", click "+ ADD URI"\n4. Paste this EXACT URL: ${redirectUri}\n5. Click "SAVE"\n6. Wait 2-3 minutes for changes to propagate\n7. Try signing in again\n\n⚠️ IMPORTANT: Each user (you and your friend) needs to add their own redirect URI!`;
       
-      console.error('❌ OAuth configuration error:', error.message);
+      console.error('❌ Redirect URI mismatch');
       console.error('Extension ID:', extensionId);
-      console.error('CRITICAL: OAuth client MUST be "Chrome Extension" type');
-      console.error('If it shows "Web application", that is the problem!');
-      console.error('Setup URL:', setupUrl);
-      console.error('Consent Screen URL:', consentUrl);
+      console.error('Redirect URI:', redirectUri);
+      console.error('Client ID:', clientId);
+      console.error('Add this to OAuth client:', redirectUri);
+    } else if (error.message.includes('invalid_request')) {
+      const extensionId = chrome.runtime.id;
+      const redirectUri = chrome.identity.getRedirectURL();
+      const setupUrl = 'https://console.cloud.google.com/apis/credentials';
+      
+      errorMessage = `❌ Invalid Request\n\nThis usually means the redirect URI is missing from your OAuth client.\n\nYour Redirect URI: ${redirectUri}\nYour Client ID: ${clientId || 'Not set'}\n\n✅ SOLUTION:\n1. Go to: ${setupUrl}\n2. Click on OAuth client: ${clientId || 'YOUR_CLIENT_ID'}\n3. Under "Authorized redirect URIs", add: ${redirectUri}\n4. Click "SAVE" and wait 2-3 minutes`;
+      
+      console.error('❌ Invalid request - likely missing redirect URI');
+      console.error('Redirect URI:', redirectUri);
+      console.error('Client ID:', clientId);
     } else if (error.message.includes('OAuth2') || error.message.includes('invalid_client')) {
       errorMessage += 'OAuth configuration error. Please check the extension\'s OAuth client ID in manifest.json.';
     } else if (error.message.includes('access_denied')) {
