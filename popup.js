@@ -820,34 +820,65 @@ async function signInWithGoogle() {
     showStatus('Signing in with Google...', 'success');
     
     // Check if chrome.identity is available
-    if (!chrome.identity || !chrome.identity.getAuthToken) {
+    if (!chrome.identity || !chrome.identity.launchWebAuthFlow) {
       throw new Error('Chrome Identity API not available. Make sure you\'re running as a Chrome extension.');
     }
     
-    // Use chrome.identity.getAuthToken - this is the correct method for Chrome Extensions
-    // It uses the oauth2.client_id and scopes from manifest.json automatically
-    // No custom redirect URIs needed - Chrome handles everything
-    console.log('Requesting Google auth token using chrome.identity.getAuthToken...');
-    console.log('Using client_id and scopes from manifest.json');
+    // Use chrome.identity.launchWebAuthFlow for Web application OAuth clients
+    const extensionId = chrome.runtime.id;
+    const redirectUri = chrome.identity.getRedirectURL();
+    const clientId = '42484888880-6i52q4ace7u3nj3mt0bvruj4osndltik.apps.googleusercontent.com';
+    const scopes = [
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/userinfo.profile'
+    ].join(' ');
+    
+    console.log('=== OAuth Debug Info ===');
+    console.log('Extension ID:', extensionId);
+    console.log('Redirect URI:', redirectUri);
+    console.log('⚠️ IMPORTANT: Add this exact redirect URI to your OAuth client in Google Cloud Console!');
+    console.log('Client ID:', clientId);
+    console.log('Using launchWebAuthFlow for Web application client');
+    
+    // Build OAuth URL
+    const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    authUrl.searchParams.set('client_id', clientId);
+    authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('response_type', 'token');
+    authUrl.searchParams.set('scope', scopes);
+    authUrl.searchParams.set('access_type', 'online');
+    
+    console.log('Full auth URL:', authUrl.toString());
     
     const token = await new Promise((resolve, reject) => {
-      chrome.identity.getAuthToken(
+      chrome.identity.launchWebAuthFlow(
         {
+          url: authUrl.toString(),
           interactive: true
-          // Scopes are automatically read from manifest.json oauth2.scopes
-          // Client ID is automatically read from manifest.json oauth2.client_id
         },
-        (authToken) => {
+        (responseUrl) => {
           if (chrome.runtime.lastError) {
             const error = chrome.runtime.lastError.message;
-            console.error('getAuthToken error:', error);
-            console.error('Full error details:', chrome.runtime.lastError);
+            console.error('launchWebAuthFlow error:', error);
             reject(new Error(error));
-          } else if (!authToken) {
+          } else if (!responseUrl) {
             reject(new Error('Authentication was cancelled or failed'));
           } else {
-            console.log('✅ Successfully got auth token');
-            resolve(authToken);
+            // Extract token from response URL
+            // Format: https://<extension-id>.chromiumapp.org/#access_token=...
+            const url = new URL(responseUrl);
+            const hash = url.hash.substring(1);
+            const params = new URLSearchParams(hash);
+            const accessToken = params.get('access_token');
+            
+            if (accessToken) {
+              console.log('✅ Successfully got auth token');
+              resolve(accessToken);
+            } else {
+              const error = params.get('error') || 'No access token in response';
+              console.error('OAuth error:', error);
+              reject(new Error(error));
+            }
           }
         }
       );
@@ -894,14 +925,24 @@ async function signInWithGoogle() {
     console.error('Google sign-in error:', error);
     let errorMessage = 'Sign-in failed. ';
     
-    if (error.message.includes('invalid_request') || error.message.includes('Custom scheme') || error.message.includes('invalid_client')) {
+    // Enhanced error logging
+    if (chrome.runtime.lastError) {
+      console.error('chrome.runtime.lastError:', chrome.runtime.lastError.message);
+    }
+    
+    if (error.message.includes('invalid_request') || error.message.includes('Custom scheme') || error.message.includes('invalid_client') || error.message.includes('did not approve')) {
       const setupUrl = 'https://console.cloud.google.com/apis/credentials';
+      const consentUrl = 'https://console.cloud.google.com/apis/credentials/consent';
+      const extensionId = chrome.runtime.id;
       
-      errorMessage = `❌ OAuth Configuration Error\n\nPossible issues:\n1. OAuth client is not "Chrome Extension" type\n2. OAuth consent screen not fully configured\n3. Scopes not added to consent screen\n4. Extension ID not added to OAuth client (optional)\n\n✅ SOLUTION:\n1. Go to: ${setupUrl}\n2. Verify your OAuth client type is "Chrome Extension"\n3. Go to OAuth consent screen and ensure it's configured\n4. Add scopes: userinfo.email, userinfo.profile\n5. Add test users if using External type\n6. Wait 5-10 minutes for changes to propagate\n\n📖 See CHROME_EXTENSION_OAUTH_FIX.md for detailed instructions.`;
+      errorMessage = `❌ OAuth Configuration Error\n\nCRITICAL: Your OAuth client MUST be "Chrome Extension" type, NOT "Web application".\n\n✅ STEP-BY-STEP FIX:\n\n1. Go to: ${setupUrl}\n2. Find client ID: 42484888880-lpmdq3tm3btgsb793d1qj3hi62r1ffo0\n3. CHECK: Application type MUST be "Chrome Extension"\n   ❌ If it says "Web application", DELETE it and create a new one\n4. Go to: ${consentUrl}\n5. Add these EXACT scopes:\n   - https://www.googleapis.com/auth/userinfo.email\n   - https://www.googleapis.com/auth/userinfo.profile\n   - openid\n6. Add your email (prithivponns@gmail.com) as a test user\n7. Save and wait 10-15 minutes\n\nExtension ID: ${extensionId}\n(Optional: Add this to OAuth client)\n\nCurrent client ID: 42484888880-koptahm8l3tobtko6eqg75c5g5qbm17u.apps.googleusercontent.com`;
       
       console.error('❌ OAuth configuration error:', error.message);
-      console.error('Verify OAuth client is "Chrome Extension" type in Google Cloud Console');
+      console.error('Extension ID:', extensionId);
+      console.error('CRITICAL: OAuth client MUST be "Chrome Extension" type');
+      console.error('If it shows "Web application", that is the problem!');
       console.error('Setup URL:', setupUrl);
+      console.error('Consent Screen URL:', consentUrl);
     } else if (error.message.includes('OAuth2') || error.message.includes('invalid_client')) {
       errorMessage += 'OAuth configuration error. Please check the extension\'s OAuth client ID in manifest.json.';
     } else if (error.message.includes('access_denied')) {

@@ -2092,54 +2092,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
     sendResponse({ success: false, error: 'No tab ID' });
-    return;
-  }
-  
+          return;
+        }
+        
   if (request.action === 'signInWithGitHub') {
     try {
       // Handle GitHub OAuth flow
-      const authUrl = request.authUrl;
-      const redirectUri = request.redirectUri;
-      
-      // Launch OAuth flow
-      chrome.identity.launchWebAuthFlow({
-        url: authUrl,
-        interactive: true
-      }, async (callbackUrl) => {
-        if (chrome.runtime.lastError) {
-          sendResponse({ success: false, error: chrome.runtime.lastError.message });
-          return;
-        }
-        
-        if (!callbackUrl) {
-          sendResponse({ success: false, error: 'OAuth flow cancelled' });
-          return;
-        }
-        
-        // Extract code from callback URL
-        const urlParams = new URLSearchParams(callbackUrl.split('?')[1]);
-        const code = urlParams.get('code');
-        const state = urlParams.get('state');
-        
-        // Verify state
-        const storedState = (await chrome.storage.local.get(['githubOAuthState'])).githubOAuthState;
-        if (state !== storedState) {
-          sendResponse({ success: false, error: 'Invalid state parameter' });
-          return;
-        }
-        
-        // Exchange code for access token (requires Client Secret - will need backend)
-        // For now, we'll use a simplified approach
-        const userInfo = await handleGitHubOAuthCallback(code, redirectUri);
-        
-        if (userInfo) {
-          sendResponse({ success: true, user: userInfo });
-        } else {
-          sendResponse({ success: false, error: 'Failed to get user info' });
-        }
+      // NOTE: GitHub OAuth requires a backend server (Client Secret cannot be in extension)
+      // This is disabled until backend is implemented
+      sendResponse({ 
+        success: false, 
+        error: 'GitHub OAuth requires a backend server. Use Google or Email sign-in instead.' 
       });
-      
-      return true; // Keep channel open for async response
+      return false;
     } catch (error) {
       console.error('GitHub OAuth error:', error);
       sendResponse({ success: false, error: error.message });

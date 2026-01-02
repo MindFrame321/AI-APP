@@ -148,6 +148,7 @@ const userApiKeys = new Map();
 let mongoClient = null;
 let db = null;
 let ticketsCollection = null;
+let conversationsCollection = null;
 
 // Initialize MongoDB connection
 async function initMongoDB() {
@@ -161,11 +162,17 @@ async function initMongoDB() {
     await mongoClient.connect();
     db = mongoClient.db();
     ticketsCollection = db.collection('supportTickets');
+    conversationsCollection = db.collection('conversations');
     
-    // Create indexes
+    // Create indexes for tickets
     await ticketsCollection.createIndex({ ticketId: 1 }, { unique: true });
     await ticketsCollection.createIndex({ userId: 1 });
     await ticketsCollection.createIndex({ createdAt: -1 });
+    
+    // Create indexes for conversations
+    await conversationsCollection.createIndex({ conversationKey: 1 }, { unique: true });
+    await conversationsCollection.createIndex({ userId: 1 });
+    await conversationsCollection.createIndex({ updatedAt: -1 });
     
     console.log('✅ MongoDB connected successfully');
     return true;
@@ -178,6 +185,7 @@ async function initMongoDB() {
 
 // Fallback in-memory storage (if MongoDB not available)
 const supportTickets = new Map();
+const conversations = new Map(); // conversationKey -> { userId, history, updatedAt }
 let ticketCounter = 1;
 let useMongoDB = false;
 
@@ -1097,7 +1105,7 @@ app.post('/api/admin/tickets/:ticketId/respond', async (req, res) => {
 // AI Support Chat Endpoint (enhanced)
 app.post('/api/support/chat', authMiddleware, async (req, res) => {
   try {
-    const { message, conversationHistory = [] } = req.body;
+    const { message, conversationKey, conversationHistory = [] } = req.body;
     const userId = req.user.sub;
     const userEmail = req.user.email;
 
@@ -1106,11 +1114,49 @@ app.post('/api/support/chat', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Message is required and must be a non-empty string' });
     }
     
+    // Conversation key validation
+    if (!conversationKey || typeof conversationKey !== 'string') {
+      return res.status(400).json({ error: 'Conversation key not found. Please start a new conversation.' });
+    }
+    
     // Sanitize message
     const sanitizedMessage = message.trim().substring(0, 1000); // Max 1000 chars for chat
     
     if (!sanitizedMessage) {
       return res.status(400).json({ error: 'Message cannot be empty' });
+    }
+    
+    // Get or create conversation from database
+    let conversation = null;
+    if (useMongoDB && conversationsCollection) {
+      conversation = await conversationsCollection.findOne({ conversationKey, userId });
+      
+      if (!conversation) {
+        // Conversation not found - return error so frontend can generate new key
+        return res.status(404).json({ 
+          error: 'Conversation key not found. Please start a new conversation.',
+          conversationKeyNotFound: true
+        });
+      }
+      
+      // Merge provided history with stored history (prefer provided for recent messages)
+      const storedHistory = conversation.history || [];
+      const mergedHistory = [...storedHistory, ...conversationHistory].slice(-20); // Keep last 20 messages
+      conversationHistory = mergedHistory;
+    } else {
+      // In-memory fallback
+      conversation = conversations.get(conversationKey);
+      if (!conversation || conversation.userId !== userId) {
+        return res.status(404).json({ 
+          error: 'Conversation key not found. Please start a new conversation.',
+          conversationKeyNotFound: true
+        });
+      }
+      
+      // Merge provided history with stored history
+      const storedHistory = conversation.history || [];
+      const mergedHistory = [...storedHistory, ...conversationHistory].slice(-20);
+      conversationHistory = mergedHistory;
     }
 
     // Get user's API key
@@ -1169,10 +1215,42 @@ Keep responses under 200 words. Be friendly and helpful.`;
                           aiResponse.toLowerCase().includes('create a ticket') ||
                           aiResponse.toLowerCase().includes('contact support');
 
+    // Update conversation history in database
+    const updatedHistory = [
+      ...conversationHistory,
+      { role: 'user', content: sanitizedMessage },
+      { role: 'assistant', content: aiResponse.trim() }
+    ].slice(-20); // Keep last 20 messages
+    
+    if (useMongoDB && conversationsCollection) {
+      await conversationsCollection.updateOne(
+        { conversationKey, userId },
+        {
+          $set: {
+            history: updatedHistory,
+            updatedAt: new Date(),
+            lastMessage: sanitizedMessage,
+            lastResponse: aiResponse.trim()
+          }
+        },
+        { upsert: true }
+      );
+    } else {
+      // In-memory fallback
+      conversations.set(conversationKey, {
+        userId,
+        history: updatedHistory,
+        updatedAt: new Date(),
+        lastMessage: sanitizedMessage,
+        lastResponse: aiResponse.trim()
+      });
+    }
+
     res.json({
       success: true,
       response: aiResponse.trim(),
-      needsHumanHelp
+      needsHumanHelp,
+      conversationKey // Return key for confirmation
     });
   } catch (error) {
     console.error('Chat error:', error);

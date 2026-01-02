@@ -8,6 +8,47 @@ const DEFAULT_BACKEND_URL = 'https://focufy-extension-1.onrender.com';
 let conversationHistory = [];
 let backendUrl = DEFAULT_BACKEND_URL;
 
+// Conversation key management
+async function getOrCreateConversationKey() {
+  try {
+    const result = await chrome.storage.local.get(['conversationKey']);
+    if (result.conversationKey) {
+      return result.conversationKey;
+    }
+    
+    // Generate new key using crypto.randomUUID()
+    const newKey = crypto.randomUUID();
+    await chrome.storage.local.set({ conversationKey: newKey });
+    return newKey;
+  } catch (error) {
+    console.error('Error getting/creating conversation key:', error);
+    // Fallback to timestamp-based key if crypto.randomUUID() fails
+    const fallbackKey = `conv-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    await chrome.storage.local.set({ conversationKey: fallbackKey });
+    return fallbackKey;
+  }
+}
+
+async function startNewConversation() {
+  // Generate new conversation key
+  const newKey = crypto.randomUUID();
+  await chrome.storage.local.set({ conversationKey: newKey });
+  
+  // Clear local conversation history
+  conversationHistory = [];
+  
+  // Clear chat messages UI
+  const messages = document.getElementById('chatMessages');
+  if (messages) {
+    messages.innerHTML = '';
+  }
+  
+  // Add welcome message
+  addWelcomeMessage();
+  
+  console.log('Started new conversation with key:', newKey);
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   await loadSettings();
   setupTabs();
@@ -64,6 +105,12 @@ function setupEventListeners() {
   });
 
   document.getElementById('ticketForm').addEventListener('submit', submitTicket);
+  
+  // New Conversation button
+  const newChatBtn = document.getElementById('newChatBtn');
+  if (newChatBtn) {
+    newChatBtn.addEventListener('click', startNewConversation);
+  }
 }
 
 function addWelcomeMessage() {
@@ -85,8 +132,9 @@ async function sendMessage() {
   const typingId = addTypingIndicator();
   
   try {
-    // Get user auth token (optional - we'll use direct API if not available)
+    // Get user auth token and conversation key
     const result = await chrome.storage.local.get(['authToken', 'user', 'settings']);
+    const conversationKey = await getOrCreateConversationKey();
 
     // Try backend first, fallback to direct API
     let aiResponse = null;
@@ -95,7 +143,7 @@ async function sendMessage() {
     // Try backend API if user is signed in
     if (result.authToken && result.user) {
       try {
-        const response = await fetch(`${backendUrl}/api/support/chat`, {
+        let response = await fetch(`${backendUrl}/api/support/chat`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -103,16 +151,42 @@ async function sendMessage() {
           },
           body: JSON.stringify({
             message,
+            conversationKey,
             conversationHistory: conversationHistory.slice(-10) // Last 10 messages
           })
         });
+
+        // Check for conversation key errors and retry once
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const errorMessage = errorData.error || '';
+          
+          // Check for conversation key error
+          if (errorMessage.toLowerCase().includes('conversation key not found') || 
+              errorData.conversationKeyNotFound) {
+            console.warn('Conversation key not found, generating new key and retrying...');
+            const newKey = await getOrCreateConversationKey();
+            // Retry once with new key
+            response = await fetch(`${backendUrl}/api/support/chat`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${result.authToken}`
+              },
+              body: JSON.stringify({
+                message,
+                conversationKey: newKey,
+                conversationHistory: conversationHistory.slice(-10)
+              })
+            });
+          }
+        }
 
         if (response.ok) {
           const data = await response.json();
           aiResponse = data.response;
           needsHumanHelp = data.needsHumanHelp || false;
         } else {
-          console.warn('Backend API failed, trying direct API...');
           throw new Error('Backend unavailable');
         }
       } catch (backendError) {
@@ -124,8 +198,8 @@ async function sendMessage() {
     // Fallback to direct Gemini API
     if (!aiResponse) {
       const apiKey = result.settings?.apiKey || 'AIzaSyDtmZYEgp9XwqIO4VgCE8J2QH7IIE_gJt4';
-      
-      if (!apiKey) {
+  
+  if (!apiKey) {
         throw new Error('No API key available');
       }
 
@@ -134,7 +208,7 @@ async function sendMessage() {
         .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
         .join('\n');
 
-      const prompt = `You are Focufy's customer support AI assistant. Focufy is a Chrome extension that helps users stay focused by blocking distracting elements on websites using AI.
+    const prompt = `You are Focufy's customer support AI assistant. Focufy is a Chrome extension that helps users stay focused by blocking distracting elements on websites using AI.
 
 ${historyContext ? `Previous conversation:\n${historyContext}\n\n` : ''}User Question: "${message}"
 
@@ -193,8 +267,73 @@ Keep responses under 200 words. Be friendly and helpful.`;
     }
   } catch (error) {
     removeTypingIndicator(typingId);
-    addBotMessage("I'm having trouble right now. Please create a support ticket or email " + SUPPORT_EMAIL + " for immediate assistance.");
+    
+    // Check for conversation key errors
+    const errorMessage = error.message || error.toString() || '';
+    if (errorMessage.toLowerCase().includes('conversation key not found')) {
+      console.warn('Conversation key error detected, generating new key...');
+      await startNewConversation();
+      addBotMessage("I've started a new conversation. Please try your question again!");
+    } else {
+      addBotMessage("I'm having trouble right now. Please create a support ticket or email " + SUPPORT_EMAIL + " for immediate assistance.");
+    }
     console.error('Chat error:', error);
+  }
+}
+
+// Helper function to send message with recovery logic
+async function sendMessageWithRecovery(url, options, conversationKey) {
+  try {
+    const response = await fetch(url, options);
+    
+    // If response is ok, return it
+    if (response.ok) {
+      return response;
+    }
+    
+    // Check for conversation key errors
+    const errorText = await response.text();
+    let errorData;
+    try {
+      errorData = JSON.parse(errorText);
+    } catch {
+      errorData = { error: errorText };
+    }
+    
+    const errorMessage = errorData.error || errorText || '';
+    if (errorMessage.toLowerCase().includes('conversation key not found')) {
+      // Generate new key and retry once
+      console.warn('Conversation key not found, generating new key and retrying...');
+      const newKey = await getOrCreateConversationKey();
+      
+      // Update the request body with new key
+      const bodyData = JSON.parse(options.body);
+      bodyData.conversationKey = newKey;
+      options.body = JSON.stringify(bodyData);
+      
+      // Retry the request
+      return await fetch(url, options);
+    }
+    
+    return response;
+  } catch (error) {
+    // Check error message for conversation key issues
+    const errorMessage = error.message || error.toString() || '';
+    if (errorMessage.toLowerCase().includes('conversation key not found')) {
+      // Generate new key and retry once
+      console.warn('Conversation key error in catch, generating new key and retrying...');
+      const newKey = await getOrCreateConversationKey();
+      
+      // Update the request body with new key
+      const bodyData = JSON.parse(options.body);
+      bodyData.conversationKey = newKey;
+      options.body = JSON.stringify(bodyData);
+      
+      // Retry the request
+      return await fetch(url, options);
+    }
+    
+    throw error;
   }
 }
 
@@ -249,7 +388,7 @@ async function submitTicket(e) {
       console.error('Failed to parse response:', e);
       data = { error: `HTTP ${response.status}: ${response.statusText}` };
     }
-
+    
     if (!response.ok) {
       console.error('Ticket creation failed:', response.status, data);
       throw new Error(data.error || data.details || 'Failed to create ticket');
@@ -290,11 +429,11 @@ async function loadTickets() {
         'Authorization': `Bearer ${result.authToken}`
       }
     });
-
+    
     if (!response.ok) {
       throw new Error('Failed to load tickets');
     }
-
+    
     const data = await response.json();
     
     if (data.tickets.length === 0) {
