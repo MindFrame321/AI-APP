@@ -393,33 +393,33 @@ function showTicketModal(ticket) {
     existingModal.remove();
   }
 
+  // Escape HTML to prevent XSS
+  const escapeHtml = (text) => {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  };
+  
   const modal = document.createElement('div');
   modal.id = 'ticketModal';
   modal.className = 'ticket-modal';
-  
-  const modalContent = document.createElement('div');
-  modalContent.className = 'ticket-modal-content';
-  
-  const modalHeader = document.createElement('div');
-  modalHeader.className = 'ticket-modal-header';
-  modalHeader.innerHTML = `
-    <h2>Ticket Details</h2>
-    <button class="ticket-modal-close" id="modalCloseBtn">×</button>
-  `;
-  
-  const modalBody = document.createElement('div');
-  modalBody.className = 'ticket-modal-body';
-  modalBody.innerHTML = `
+  modal.innerHTML = `
+    <div class="ticket-modal-content">
+      <div class="ticket-modal-header">
+        <h2>Ticket Details</h2>
+        <button class="ticket-modal-close" id="modalCloseBtn">×</button>
+      </div>
       <div class="ticket-modal-body">
         <div class="ticket-detail-section">
           <div class="ticket-detail-row">
-            <strong>Ticket ID:</strong> <span class="ticket-id-text">${ticket.ticketId}</span>
+            <strong>Ticket ID:</strong> <span class="ticket-id-text">${escapeHtml(ticket.ticketId)}</span>
           </div>
           <div class="ticket-detail-row">
             <strong>Status:</strong> <span class="ticket-status-badge status-${ticket.status}">${ticket.status.toUpperCase()}</span>
           </div>
           <div class="ticket-detail-row">
-            <strong>Category:</strong> ${ticket.category}
+            <strong>Category:</strong> ${escapeHtml(ticket.category)}
           </div>
           <div class="ticket-detail-row">
             <strong>Created:</strong> ${new Date(ticket.createdAt).toLocaleString()}
@@ -431,7 +431,7 @@ function showTicketModal(ticket) {
 
         <div class="ticket-detail-section">
           <h3>Your Message</h3>
-          <div class="ticket-message-box">${ticket.message.replace(/\n/g, '<br>')}</div>
+          <div class="ticket-message-box">${escapeHtml(ticket.message).replace(/\n/g, '<br>')}</div>
         </div>
 
         ${ticket.responses && ticket.responses.length > 0 ? `
@@ -443,7 +443,7 @@ function showTicketModal(ticket) {
                   <strong>Admin Response #${idx + 1}</strong>
                   <span class="response-date">${new Date(response.respondedAt).toLocaleString()}</span>
                 </div>
-                <div class="response-message">${response.message.replace(/\n/g, '<br>')}</div>
+                <div class="response-message">${escapeHtml(response.message).replace(/\n/g, '<br>')}</div>
               </div>
             `).join('')}
           </div>
@@ -454,12 +454,38 @@ function showTicketModal(ticket) {
         `}
       </div>
       <div class="ticket-modal-footer">
-        <button class="btn-primary" onclick="closeTicketModal()">Close</button>
+        <button class="btn-primary" id="modalCloseBtnFooter">Close</button>
       </div>
     </div>
   `;
 
   document.body.appendChild(modal);
+  
+  // Add event listeners for close buttons
+  const closeBtn = modal.querySelector('#modalCloseBtn');
+  const closeBtnFooter = modal.querySelector('#modalCloseBtnFooter');
+  
+  if (closeBtn) {
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeTicketModal();
+    });
+  }
+  
+  if (closeBtnFooter) {
+    closeBtnFooter.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeTicketModal();
+    });
+  }
+  
+  // Prevent modal content clicks from closing the modal
+  const modalContent = modal.querySelector('.ticket-modal-content');
+  if (modalContent) {
+    modalContent.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+  }
   
   // Close on outside click
   modal.addEventListener('click', (e) => {
@@ -467,6 +493,15 @@ function showTicketModal(ticket) {
       closeTicketModal();
     }
   });
+  
+  // Close on Escape key
+  const escapeHandler = (e) => {
+    if (e.key === 'Escape') {
+      closeTicketModal();
+      document.removeEventListener('keydown', escapeHandler);
+    }
+  };
+  document.addEventListener('keydown', escapeHandler);
 }
 
 // Close ticket modal
