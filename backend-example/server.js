@@ -768,6 +768,54 @@ app.get('/api/support/tickets/:ticketId', authMiddleware, async (req, res) => {
   }
 });
 
+// User endpoint to add reply to their own ticket
+app.post('/api/support/tickets/:ticketId/reply', authMiddleware, async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { message } = req.body;
+    const userId = req.user.sub;
+
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    const ticket = supportTickets.get(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    // Verify user owns this ticket
+    if (ticket.userId !== userId) {
+      return res.status(403).json({ error: 'Unauthorized - you can only reply to your own tickets' });
+    }
+
+    // Add user reply
+    ticket.responses.push({
+      message: message.trim(),
+      respondedBy: 'User',
+      respondedAt: new Date().toISOString()
+    });
+
+    ticket.updatedAt = new Date().toISOString();
+    supportTickets.set(ticketId, ticket);
+
+    console.log(`✅ User reply added to ticket ${ticketId}`);
+
+    res.json({
+      success: true,
+      message: 'Reply added successfully',
+      ticket: {
+        ticketId: ticket.ticketId,
+        status: ticket.status,
+        responses: ticket.responses
+      }
+    });
+  } catch (error) {
+    console.error('Add reply error:', error);
+    res.status(500).json({ error: 'Failed to add reply' });
+  }
+});
+
 // Admin endpoint to add response to a ticket
 app.post('/api/admin/tickets/:ticketId/respond', async (req, res) => {
   try {

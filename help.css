@@ -589,3 +589,54 @@ header h1 {
   justify-content: flex-end;
 }
 
+.user-reply-textarea {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid #e2e8f0;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 14px;
+  margin-bottom: 10px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.user-reply-textarea:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.user-reply-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.reply-status {
+  margin-top: 10px;
+  padding: 8px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.reply-status.success {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.reply-status.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.user-response {
+  background: #eff6ff;
+  border-left-color: #3b82f6;
+}
+
+.admin-response {
+  background: #f0fdf4;
+  border-left-color: #10b981;
+}
+

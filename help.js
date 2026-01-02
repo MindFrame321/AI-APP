@@ -502,6 +502,63 @@ function showTicketModal(ticket) {
     }
   };
   document.addEventListener('keydown', escapeHandler);
+  
+  // Add reply functionality
+  const submitReplyBtn = modal.querySelector('#submitReplyBtn');
+  const replyTextarea = modal.querySelector('#userReplyText');
+  const replyStatus = modal.querySelector('#replyStatus');
+  
+  if (submitReplyBtn && replyTextarea) {
+    submitReplyBtn.addEventListener('click', async () => {
+      const message = replyTextarea.value.trim();
+      if (!message) {
+        replyStatus.className = 'reply-status error';
+        replyStatus.textContent = 'Please enter a reply message.';
+        return;
+      }
+      
+      replyStatus.className = 'reply-status';
+      replyStatus.textContent = 'Sending...';
+      submitReplyBtn.disabled = true;
+      
+      try {
+        const result = await chrome.storage.local.get(['authToken', 'user']);
+        if (!result.authToken || !result.user) {
+          throw new Error('Please sign in with Google to reply to tickets.');
+        }
+        
+        const response = await fetch(`${backendUrl}/api/support/tickets/${ticket.ticketId}/reply`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${result.authToken}`
+          },
+          body: JSON.stringify({ message })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+          replyStatus.className = 'reply-status success';
+          replyStatus.textContent = '✅ Reply sent successfully!';
+          replyTextarea.value = '';
+          
+          // Reload ticket to show new reply
+          setTimeout(() => {
+            viewTicketDetails(ticket.ticketId);
+          }, 1000);
+        } else {
+          throw new Error(data.error || 'Failed to send reply');
+        }
+      } catch (error) {
+        replyStatus.className = 'reply-status error';
+        replyStatus.textContent = '❌ Error: ' + error.message;
+        console.error('Reply error:', error);
+      } finally {
+        submitReplyBtn.disabled = false;
+      }
+    });
+  }
 }
 
 // Close ticket modal
