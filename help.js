@@ -220,6 +220,9 @@ async function submitTicket(e) {
   statusDiv.classList.remove('hidden');
 
   try {
+    console.log('Submitting ticket to:', `${backendUrl}/api/support/tickets`);
+    console.log('Ticket data:', { category, subject, message: message.substring(0, 50) + '...' });
+    
     const response = await fetch(`${backendUrl}/api/support/tickets`, {
       method: 'POST',
       headers: {
@@ -233,9 +236,16 @@ async function submitTicket(e) {
       })
     });
 
+    let errorData;
+    try {
+      errorData = await response.json();
+    } catch (e) {
+      errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
+    }
+
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to create ticket');
+      console.error('Ticket creation failed:', response.status, errorData);
+      throw new Error(errorData.error || errorData.details || 'Failed to create ticket');
     }
 
     const data = await response.json();

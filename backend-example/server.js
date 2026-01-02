@@ -703,11 +703,16 @@ app.post('/api/analyze-page', authMiddleware, async (req, res) => {
 // Create a new support ticket
 app.post('/api/support/tickets', authMiddleware, async (req, res) => {
   try {
+    console.log('[Create Ticket] Request received');
     const { subject, message, category = 'general' } = req.body;
     const userId = req.user.sub;
     const userEmail = req.user.email;
 
+    console.log('[Create Ticket] User:', userId, userEmail);
+    console.log('[Create Ticket] Data:', { subject, message, category });
+
     if (!subject || !message) {
+      console.log('[Create Ticket] Missing required fields');
       return res.status(400).json({ error: 'Subject and message are required' });
     }
 
@@ -725,6 +730,7 @@ app.post('/api/support/tickets', authMiddleware, async (req, res) => {
       responses: []
     };
 
+    console.log('[Create Ticket] Attempting to save ticket:', ticketId);
     await setTicket(ticket);
     console.log(`✅ Support ticket created: ${ticketId} by ${userEmail}`);
 
@@ -744,8 +750,12 @@ app.post('/api/support/tickets', authMiddleware, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Ticket creation error:', error);
-    res.status(500).json({ error: 'Failed to create support ticket' });
+    console.error('[Create Ticket] Error details:', error);
+    console.error('[Create Ticket] Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to create support ticket',
+      details: error.message 
+    });
   }
 });
 
