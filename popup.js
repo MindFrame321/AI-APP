@@ -820,63 +820,31 @@ async function signInWithGoogle() {
     showStatus('Signing in with Google...', 'success');
     
     // Check if chrome.identity is available
-    if (!chrome.identity || !chrome.identity.launchWebAuthFlow) {
+    if (!chrome.identity || !chrome.identity.getAuthToken) {
       throw new Error('Chrome Identity API not available. Make sure you\'re running as a Chrome extension.');
     }
     
-    // Get the extension's redirect URL
-    const redirectUrl = chrome.identity.getRedirectURL();
-    console.log('Redirect URL:', redirectUrl);
+    console.log('Requesting Google auth token...');
     
-    // OAuth configuration - using Web application client
-    const clientId = '42484888880-r0rgoel8vrhmk5tsdtfibb0jot3vgksd.apps.googleusercontent.com';
-    const scopes = ['openid', 'email', 'profile'].join(' ');
-    
-    // Build the OAuth URL
-    const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    authUrl.searchParams.set('client_id', clientId);
-    authUrl.searchParams.set('redirect_uri', redirectUrl);
-    authUrl.searchParams.set('response_type', 'token');
-    authUrl.searchParams.set('scope', scopes);
-    authUrl.searchParams.set('prompt', 'select_account');
-    
-    console.log('Launching auth flow...');
-    
-    // Launch the OAuth flow
-    const responseUrl = await new Promise((resolve, reject) => {
-      chrome.identity.launchWebAuthFlow(
+    // Use chrome.identity.getAuthToken - this automatically handles redirect URIs
+    // No need to manually configure redirect URIs in Google Cloud Console
+    const token = await new Promise((resolve, reject) => {
+      chrome.identity.getAuthToken(
         {
-          url: authUrl.toString(),
-          interactive: true
+          interactive: true,
+          scopes: ['openid', 'email', 'profile']
         },
-        (callbackUrl) => {
+        (token) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
-          } else if (!callbackUrl) {
-            reject(new Error('Authentication was cancelled'));
+          } else if (!token) {
+            reject(new Error('Authentication was cancelled or failed'));
           } else {
-            resolve(callbackUrl);
+            resolve(token);
           }
         }
       );
     });
-    
-    console.log('Auth flow completed, parsing response...');
-    
-    // Extract the access token from the callback URL
-    const urlHash = responseUrl.split('#')[1];
-    if (!urlHash) {
-      throw new Error('No token in response');
-    }
-    
-    const params = new URLSearchParams(urlHash);
-    const token = params.get('access_token');
-    
-    if (!token) {
-      const error = params.get('error');
-      const errorDescription = params.get('error_description');
-      throw new Error(errorDescription || error || 'No access token received');
-    }
     
     console.log('Got token! Fetching user info...');
     
@@ -919,9 +887,8 @@ async function signInWithGoogle() {
     console.error('Google sign-in error:', error);
     let errorMessage = 'Sign-in failed. ';
     
-    if (error.message.includes('invalid_client') || error.message.includes('400')) {
-      errorMessage += 'Please add this redirect URI to Google Cloud Console: ' + chrome.identity.getRedirectURL();
-      console.error('Add this redirect URI to Google Cloud Console:', chrome.identity.getRedirectURL());
+    if (error.message.includes('OAuth2') || error.message.includes('invalid_client')) {
+      errorMessage += 'OAuth configuration error. Please check the extension\'s OAuth client ID in manifest.json.';
     } else if (error.message.includes('access_denied')) {
       errorMessage = 'Access denied. Please try again.';
     } else if (error.message.includes('cancelled') || error.message.includes('closed')) {
