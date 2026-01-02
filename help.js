@@ -353,6 +353,7 @@ function removeTypingIndicator(id) {
 
 // View full ticket details including responses
 async function viewTicketDetails(ticketId) {
+  console.log('Viewing ticket details for:', ticketId);
   try {
     const result = await chrome.storage.local.get(['authToken', 'user']);
     if (!result.authToken || !result.user) {
@@ -360,6 +361,7 @@ async function viewTicketDetails(ticketId) {
       return;
     }
 
+    console.log('Fetching ticket from:', `${backendUrl}/api/support/tickets/${ticketId}`);
     const response = await fetch(`${backendUrl}/api/support/tickets/${ticketId}`, {
       method: 'GET',
       headers: {
@@ -384,6 +386,7 @@ async function viewTicketDetails(ticketId) {
 
 // Show ticket details in a modal
 function showTicketModal(ticket) {
+  console.log('Showing ticket modal for:', ticket.ticketId);
   // Remove existing modal if any
   const existingModal = document.getElementById('ticketModal');
   if (existingModal) {
