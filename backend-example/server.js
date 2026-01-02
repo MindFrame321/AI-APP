@@ -152,17 +152,30 @@ async function generateUserApiKeyWithServiceAccount(userId, userEmail) {
     }
     
     const keyData = await apiKeyResponse.json();
+    console.log('📋 API Key creation response:', JSON.stringify(keyData, null, 2));
+    
+    // Check if keyString is already in the response (some API versions return it directly)
+    if (keyData.keyString) {
+      console.log(`✅ Created unique API key for user ${userId} (${userEmail}) - key string in response`);
+      return keyData.keyString;
+    }
     
     // The response contains the key name, but we need to get the actual key string
     const keyName = keyData.name;
+    if (!keyName) {
+      throw new Error('API key created but no key name returned in response');
+    }
     
-    // Get the actual key string (the secret)
+    console.log(`🔑 Key name: ${keyName}, attempting to retrieve key string...`);
+    
+    // Get the actual key string (the secret) using getKeyString method
     const keyDetailsResponse = await fetch(
       `https://apikeys.googleapis.com/v2/${keyName}:getKeyString`,
       {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
       }
     );
@@ -170,13 +183,28 @@ async function generateUserApiKeyWithServiceAccount(userId, userEmail) {
     if (keyDetailsResponse.ok) {
       const keyDetails = await keyDetailsResponse.json();
       const actualKey = keyDetails.keyString;
-      console.log(`✅ Created unique API key for user ${userId} (${userEmail})`);
-      return actualKey;
+      if (actualKey) {
+        console.log(`✅ Created unique API key for user ${userId} (${userEmail})`);
+        return actualKey;
+      } else {
+        console.error('❌ getKeyString response missing keyString:', keyDetails);
+        throw new Error('getKeyString response missing keyString field');
+      }
     }
     
-    // Fallback: if we can't get the key string, try alternative endpoint
-    console.warn('Could not get key string, trying alternative method...');
-    throw new Error('Created key but could not retrieve key string. Check Service Account permissions.');
+    // If getKeyString failed, log the error and provide helpful message
+    const errorText = await keyDetailsResponse.text();
+    console.error('❌ getKeyString failed:', keyDetailsResponse.status, errorText);
+    
+    if (keyDetailsResponse.status === 401 || keyDetailsResponse.status === 403) {
+      throw new Error(`Cannot retrieve API key string. Service Account needs additional permissions:
+1. Add "API Keys Viewer" role (roles/serviceusage.apiKeysViewer) to your Service Account
+2. Go to: https://console.cloud.google.com/iam-admin/iam?project=${GOOGLE_CLOUD_PROJECT_ID}
+3. Find your Service Account → Edit → Add Role → "API Keys Viewer"
+4. The key was created (name: ${keyName}) but we cannot retrieve the key string without this permission`);
+    }
+    
+    throw new Error(`Created key (name: ${keyName}) but could not retrieve key string. Status: ${keyDetailsResponse.status}, Error: ${errorText}`);
     
   } catch (error) {
     console.error('Error generating API key with Service Account:', error);
