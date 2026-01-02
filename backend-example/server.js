@@ -1005,8 +1005,8 @@ app.get('/admin/tickets', async (req, res) => {
         .response-header strong { color: #10b981; }
         .response-date { color: #64748b; }
         .response-message { color: #1e293b; white-space: pre-wrap; }
-        .response-form { margin-top: 20px; padding-top: 20px; padding-bottom: 20px; border-top: 2px solid #e2e8f0; background: #ffffff; border-radius: 6px; padding: 20px; }
-        .response-form h3 { font-size: 16px; color: #1e293b; margin-bottom: 10px; font-weight: 600; }
+        .response-form { margin-top: 30px; padding: 20px; border-top: 3px solid #10b981; background: #f0fdf4; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .response-form h3 { font-size: 18px; color: #1e293b; margin-bottom: 15px; font-weight: 600; }
         .response-textarea { width: 100%; padding: 12px; border: 2px solid #e2e8f0; border-radius: 6px; font-family: inherit; font-size: 14px; margin-bottom: 10px; resize: vertical; }
         .response-textarea:focus { outline: none; border-color: #667eea; }
         .response-actions { display: flex; gap: 10px; align-items: center; }
