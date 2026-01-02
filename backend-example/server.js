@@ -60,23 +60,22 @@ async function generateUserApiKeyWithServiceAccount(userId, userEmail) {
     
     console.log(`🔄 Creating API key for user ${userId} using Service Account...`);
     
-    // Get Service Account token with proper scopes
-    const authClient = await serviceAccountAuth.getClient({
-      scopes: [
-        'https://www.googleapis.com/auth/cloud-platform',
-        'https://www.googleapis.com/auth/service.management'
-      ]
+    // Get Service Account client and request access token
+    const authClient = await serviceAccountAuth.getClient();
+    
+    // Request access token with explicit scopes
+    await authClient.request({
+      url: 'https://www.googleapis.com/auth/cloud-platform'
     });
     
-    // Request access token
     const tokenResponse = await authClient.getAccessToken();
-    const token = tokenResponse.token;
+    const token = tokenResponse.token || tokenResponse;
     
     if (!token) {
       throw new Error('Failed to get Service Account access token');
     }
     
-    console.log('Service Account token obtained, length:', token.length);
+    console.log('Service Account token obtained');
     
     // Create API key via Google Cloud API Key Management API
     // This creates a REAL, unique API key for each user in YOUR Google Cloud project
