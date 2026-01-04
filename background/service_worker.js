@@ -246,10 +246,11 @@ function normalizeDomain(d) {
 // Check if domain should be blocked
 async function shouldBlockDomain(url) {
   console.log('[shouldBlockDomain] Checking:', url);
+  console.log('[shouldBlockDomain] currentSession:', currentSession);
   console.log('[shouldBlockDomain] currentSession?.active:', currentSession?.active);
   
   if (!currentSession?.active) {
-    console.log('[shouldBlockDomain] No active session, returning false');
+    console.log('[shouldBlockDomain] ⚠️ No active session - blocking only works during active focus sessions');
     return false;
   }
   
