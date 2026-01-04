@@ -339,44 +339,19 @@ function setupEventListeners() {
   if (settingsLink) {
     const url = chrome.runtime.getURL('settings.html');
     settingsLink.href = url;
-    settingsLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      try {
-        chrome.runtime.openOptionsPage();
-      } catch (err) {
-        try {
-          chrome.tabs.create({ url });
-        } catch {
-          window.open(url, '_blank');
-        }
-      }
-    });
+    settingsLink.target = '_blank';
   }
   
   if (analyticsLink) {
     const url = chrome.runtime.getURL('analytics.html');
     analyticsLink.href = url;
-    analyticsLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      try {
-        chrome.tabs.create({ url });
-      } catch (err) {
-        window.open(url, '_blank');
-      }
-    });
+    analyticsLink.target = '_blank';
   }
   
   if (helpLink) {
     const url = chrome.runtime.getURL('help.html');
     helpLink.href = url;
-    helpLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      try {
-        chrome.tabs.create({ url });
-      } catch (err) {
-        window.open(url, '_blank');
-      }
-    });
+    helpLink.target = '_blank';
   }
   
   if (gamificationLink) {
