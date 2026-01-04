@@ -113,6 +113,15 @@ async function loadSessionState() {
       console.log('[loadSessionState] ✅ Session is still active, starting monitoring');
       currentSession.active = true; // Ensure active flag is set
       startSessionMonitoring();
+      
+      // Apply blocking rules for always-block list
+      const settings = await getSettings();
+      if (settings.alwaysBlock && settings.alwaysBlock.length > 0) {
+        const normalizedBlocked = settings.alwaysBlock
+          .map(d => normalizeToHostname(d))
+          .filter(h => h);
+        await applyBlockedSites(normalizedBlocked);
+      }
     } else {
       console.log('[loadSessionState] ⚠️ Session expired, ending session');
       await endSession();
@@ -120,6 +129,8 @@ async function loadSessionState() {
   } else {
     console.log('[loadSessionState] No session found in storage');
     currentSession = null;
+    // Clear blocking rules if no session
+    await clearBlockedSites();
   }
   
   // Load learning data if exists
@@ -174,6 +185,16 @@ async function startSession(taskDescription, durationMinutes) {
   
   chrome.alarms.create('sessionEnd', { when: endTime });
   startSessionMonitoring();
+  
+  // Apply blocking rules for always-block list
+  const settings = await getSettings();
+  if (settings.alwaysBlock && settings.alwaysBlock.length > 0) {
+    const normalizedBlocked = settings.alwaysBlock
+      .map(d => normalizeToHostname(d))
+      .filter(h => h);
+    console.log('[startSession] Applying blocking rules for:', normalizedBlocked);
+    await applyBlockedSites(normalizedBlocked);
+  }
   
   // Track analytics
   await trackSessionStart(taskDescription, durationMinutes);
