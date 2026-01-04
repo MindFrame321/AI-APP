@@ -976,7 +976,8 @@ async function analyzeAndBlockPage(tabId, url) {
         action: action,
         reason: analysis.reason || 'irrelevant',
         score: analysis.score || 50,
-        selectors: analysis.selectorsToBlock || []
+        selectors: analysis.selectorsToBlock || [],
+        explanation: analysis.reason ? `Blocked because: ${analysis.reason}` : undefined
       };
       
       await chrome.tabs.sendMessage(tabId, message);
@@ -2533,6 +2534,91 @@ User question: "${question}"
 Respond as plain text (no JSON).`;
 }
 
+// Build short quiz prompt for unlocks
+async function buildQuizPrompt(pageContent) {
+  const sessionGoal = currentSession?.taskDescription || 'general learning';
+  const contextText = pageContent?.text ? pageContent.text.substring(0, 1200) : '';
+  return `Create ONE short quiz question to confirm the user understands the topic.
+
+Study goal: "${sessionGoal}"
+Page title: ${pageContent?.title || 'Unknown'}
+Page excerpt: ${contextText}
+
+Return STRICT JSON: {"question":"...","answer":"...","explanation":"..."}
+- Keep question concise and answer short (few words).
+- Explanation should be one sentence.
+`;
+}
+
+async function generateQuizQuestion(tabId) {
+  const settings = await getSettings();
+  const apiKey = settings?.apiKey || DEFAULT_API_KEY;
+  const backendUrl = settings?.backendUrl;
+  const tokenResult = await chrome.storage.local.get(['authToken']);
+  const authToken = tokenResult.authToken;
+
+  let pageContent = null;
+  if (tabId) {
+    try { pageContent = await extractPageContent(tabId); } catch (e) {}
+  }
+  const prompt = await buildQuizPrompt(pageContent);
+
+  if (!backendUrl && !apiKey) {
+    return { question: 'What is your current study goal?', answer: (currentSession?.taskDescription || '').toLowerCase(), explanation: 'We want to confirm you remember your focus.' };
+  }
+
+  try {
+    let response;
+    if (backendUrl && authToken) {
+      response = await makeRateLimitedApiCall(() =>
+        fetch(backendUrl + '/api/analyze-page', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ prompt })
+        })
+      );
+    } else {
+      let apiUrl = settings?.apiUrl || CURRENT_MODEL_URL;
+      if (apiUrl.includes('gemini-pro') || apiUrl.includes('gemini-1.5') || apiUrl.includes('gemini-2') || apiUrl.includes('gemini-3')) {
+        apiUrl = CURRENT_MODEL_URL;
+      }
+      response = await makeRateLimitedApiCall(() =>
+        fetch(`${apiUrl}?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.3, maxOutputTokens: 200 }
+          })
+        })
+      );
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Quiz API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || data.text || '';
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+  } catch (error) {
+    console.error('[Quiz] Error generating quiz:', error);
+  }
+
+  return {
+    question: 'Name one key term from your current study goal.',
+    answer: (currentSession?.taskDescription || '').split(' ')[0] || 'focus',
+    explanation: 'Quick recall helps verify focus.'
+  };
+}
+
 // Chatbot handler
 async function handleChatbotQuestion({ question, tabId, selectionText, pageUrl }) {
   const settings = await getSettings();
@@ -2740,6 +2826,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     sendResponse({ success: true });
     return;
+  }
+
+  if (request.action === 'generateQuiz') {
+    (async () => {
+      try {
+        const quiz = await generateQuizQuestion(sender.tab?.id);
+        sendResponse({ success: true, quiz });
+      } catch (error) {
+        console.error('[Quiz] Failed to generate quiz:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
   }
 
   if (request.action === 'chatbotQuestion') {

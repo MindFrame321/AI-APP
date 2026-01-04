@@ -15,6 +15,7 @@ let chatMessagesEl = null;
 let chatInputEl = null;
 let chatPanelEl = null;
 let chatToggleEl = null;
+let quizData = null;
 
 // Block page immediately - runs BEFORE page loads
 function blockPageImmediately() {
@@ -164,7 +165,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     stopBlocking();
     sendResponse({ success: true });
   } else if (request.action === 'applyBlocks') {
-    applyBlocks(request.selectors || [], request.reason);
+    applyBlocks(request.selectors || [], request.reason, request.explanation);
     sendResponse({ success: true });
   } else if (request.action === 'clearBlocks') {
     clearAllBlocks();
@@ -444,6 +445,94 @@ async function submitChat(prefilled) {
   }
 }
 
+// Quiz modal for unlocking
+async function showQuizModal() {
+  let modal = document.getElementById('focufy-quiz-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'focufy-quiz-modal';
+    modal.style.cssText = `
+      position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 100000000;
+      display: flex; align-items: center; justify-content: center; padding: 16px;
+    `;
+    modal.innerHTML = `
+      <div style="background:#0f172a; color:#e2e8f0; width: min(520px, 100%); border-radius: 16px; padding: 20px; box-shadow: 0 30px 80px rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.12);">
+        <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom: 12px;">
+          <div>
+            <div style="font-size:16px; font-weight:700;">Quick quiz to unlock</div>
+            <div style="font-size:12px; opacity:0.75;">Answer correctly to end the block.</div>
+          </div>
+          <button id="focufy-quiz-close" style="background:transparent; border:1px solid rgba(255,255,255,0.2); color:#e2e8f0; border-radius:10px; width:32px; height:32px; cursor:pointer;">×</button>
+        </div>
+        <div id="focufy-quiz-question" style="margin-bottom:12px; font-size:14px; line-height:1.4;">Loading quiz...</div>
+        <input id="focufy-quiz-answer" type="text" placeholder="Your answer" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.05); color:#e2e8f0; margin-bottom:12px;" />
+        <div id="focufy-quiz-feedback" style="min-height:18px; font-size:12px; color:#f6ad55;"></div>
+        <div style="display:flex; gap:8px; margin-top:12px;">
+          <button id="focufy-quiz-reason" class="focufy-btn secondary" style="flex:1; background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); color:#e2e8f0; padding:10px 12px; border-radius:12px; cursor:pointer;">Reason with Coach</button>
+          <button id="focufy-quiz-submit" class="focufy-btn primary" style="flex:1; background: linear-gradient(135deg,#48bb78,#38a169); color:white; border:none; padding:10px 12px; border-radius:12px; cursor:pointer; font-weight:700;">Submit</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
+  modal.style.display = 'flex';
+  document.getElementById('focufy-quiz-feedback').textContent = '';
+  document.getElementById('focufy-quiz-answer').value = '';
+  document.getElementById('focufy-quiz-close').onclick = () => { modal.style.display = 'none'; };
+  document.getElementById('focufy-quiz-reason').onclick = () => {
+    toggleChatPanel();
+    submitChat('Explain why this page was blocked and if it can be allowed.');
+  };
+  document.getElementById('focufy-quiz-submit').onclick = submitQuizAnswer;
+
+  await loadQuizQuestion();
+}
+
+async function loadQuizQuestion() {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'generateQuiz' });
+    if (response?.success && response.quiz) {
+      quizData = response.quiz;
+      document.getElementById('focufy-quiz-question').textContent = response.quiz.question || 'Answer to unlock.';
+    } else {
+      quizData = { question: 'What is your study goal?', answer: (currentSession?.taskDescription || '').toLowerCase(), explanation: '' };
+      document.getElementById('focufy-quiz-question').textContent = quizData.question;
+    }
+  } catch (error) {
+    console.error('[Focufy] Quiz error:', error);
+  }
+}
+
+async function submitQuizAnswer() {
+  const input = document.getElementById('focufy-quiz-answer');
+  const feedback = document.getElementById('focufy-quiz-feedback');
+  if (!input || !quizData) return;
+  const userAns = input.value.trim().toLowerCase();
+  const expected = (quizData.answer || '').toLowerCase();
+
+  if (!userAns) {
+    feedback.textContent = 'Please enter an answer.';
+    return;
+  }
+
+  if (expected && userAns.includes(expected.substring(0, Math.min(expected.length, 4)))) {
+    feedback.style.color = '#48bb78';
+    feedback.textContent = quizData.explanation || 'Great! Unlocking now.';
+    setTimeout(async () => {
+      const modal = document.getElementById('focufy-quiz-modal');
+      if (modal) modal.style.display = 'none';
+      await chrome.runtime.sendMessage({ action: 'endSession' });
+      clearAllBlocks();
+      const overlay = document.getElementById('focus-ai-overlay');
+      if (overlay) overlay.remove();
+    }, 400);
+  } else {
+    feedback.style.color = '#f56565';
+    feedback.textContent = 'Incorrect. Try again or ask the Coach.';
+  }
+}
+
 
 // Start blocking
 function startBlocking(session) {
@@ -470,7 +559,7 @@ function stopBlocking() {
 }
 
 // Apply blocks to specific selectors
-function applyBlocks(selectors, reason) {
+function applyBlocks(selectors, reason, explanation) {
   console.log('[Focufy] applyBlocks called with', selectors?.length || 0, 'selectors, reason:', reason);
   
   if (!isBlockingActive) {
@@ -527,7 +616,7 @@ function applyBlocks(selectors, reason) {
             return;
           }
         }
-        blockElement(el);
+        blockElement(el, explanation || reason);
         blockedCount++;
       });
     } catch (e) {
@@ -539,7 +628,7 @@ function applyBlocks(selectors, reason) {
           const elements = document.querySelectorAll(`[class*="${className}"]`);
           console.log('[Focufy] Fallback: found', elements.length, 'elements with class containing', className);
           elements.forEach(el => {
-            blockElement(el);
+            blockElement(el, reason);
             blockedCount++;
           });
         } catch (e2) {
@@ -558,7 +647,7 @@ function applyBlocks(selectors, reason) {
 }
 
 // Block a single element
-function blockElement(element) {
+function blockElement(element, explanation) {
   if (blockedElements.has(element)) return;
   blockedElements.add(element);
   
@@ -567,8 +656,42 @@ function blockElement(element) {
   element.style.display = 'none';
   element.setAttribute('data-focus-ai-blocked', 'true');
   element.setAttribute('data-focus-ai-original-display', originalDisplay || '');
+  if (explanation) {
+    addBlockIndicator(element, explanation);
+  }
   
   console.log('[Focufy] Blocked element:', element.tagName, element.className || element.id || 'no-id');
+}
+
+function addBlockIndicator(element, explanation) {
+  try {
+    const badge = document.createElement('div');
+    badge.className = 'focus-ai-block-indicator';
+    badge.textContent = explanation || 'Blocked by Focufy';
+    badge.style.position = 'relative';
+    badge.style.display = 'inline-block';
+    badge.style.background = 'rgba(102,126,234,0.14)';
+    badge.style.color = '#fff';
+    badge.style.padding = '6px 10px';
+    badge.style.borderRadius = '10px';
+    badge.style.fontSize = '12px';
+    badge.style.fontWeight = '600';
+    badge.style.border = '1px solid rgba(255,255,255,0.2)';
+    badge.style.marginBottom = '6px';
+    badge.style.boxShadow = '0 6px 18px rgba(0,0,0,0.15)';
+    
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'relative';
+    wrapper.style.display = 'block';
+    wrapper.style.margin = '6px 0';
+    wrapper.appendChild(badge);
+    
+    if (element.parentNode) {
+      element.parentNode.insertBefore(wrapper, element);
+    }
+  } catch (e) {
+    console.warn('[Focufy] Failed to add block indicator:', e);
+  }
 }
 
 // Clear all blocks
@@ -695,33 +818,72 @@ function showBlockedOverlay(reason) {
   const time = currentSession ? Math.ceil((currentSession.endTime - Date.now()) / 60000) : 0;
   
   overlay.innerHTML = `
-    <div style="max-width: 600px;">
-      <div style="font-size: 64px; margin-bottom: 24px;">🚫</div>
-      <h1 style="font-size: 32px; margin-bottom: 16px; color: white;">Page Blocked</h1>
-      <p style="font-size: 18px; margin-bottom: 32px; opacity: 0.9; color: white;">
-        This page is not relevant to your current focus task.
-      </p>
-      <div style="background: rgba(255,255,255,0.1); padding: 24px; border-radius: 12px; margin: 24px 0;">
-        <div style="font-size: 14px; opacity: 0.8; margin-bottom: 8px; color: white;">Your Focus Task</div>
-        <div style="font-size: 20px; font-style: italic; color: white;">"${task}"</div>
+    <div style="max-width: 680px; width: 100%; background: rgba(255,255,255,0.08); border-radius: 16px; padding: 24px; box-shadow: 0 30px 80px rgba(0,0,0,0.35); backdrop-filter: blur(6px);">
+      <div style="display:flex; align-items:center; gap:16px; margin-bottom:16px;">
+        <div style="font-size: 48px;">🚫</div>
+        <div>
+          <h1 style="font-size: 26px; margin:0 0 6px 0; color: white;">Blocked to keep you on task</h1>
+          <p style="margin:0; color: rgba(255,255,255,0.8); font-size: 14px;">This page looks off-topic for your current focus.</p>
+        </div>
       </div>
-      <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 12px; margin: 24px 0;">
-        <div style="font-size: 14px; opacity: 0.8; margin-bottom: 8px; color: white;">Time Remaining</div>
-        <div style="font-size: 36px; font-weight: bold; color: white;">${time} min</div>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:12px; margin-bottom:16px;">
+        <div style="background: rgba(255,255,255,0.08); padding: 16px; border-radius: 12px; border:1px solid rgba(255,255,255,0.12);">
+          <div style="font-size: 12px; opacity:0.75; margin-bottom:6px;">Your Focus Task</div>
+          <div style="font-size: 18px; font-style: italic; color: white;">"${task}"</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.08); padding: 16px; border-radius: 12px; border:1px solid rgba(255,255,255,0.12);">
+          <div style="font-size: 12px; opacity:0.75; margin-bottom:6px;">Time Remaining</div>
+          <div style="font-size: 28px; font-weight: 700; color: white;">${time} min</div>
+        </div>
       </div>
-      <button onclick="window.history.back()" style="
-        padding: 12px 24px;
-        background: white;
-        color: #667eea;
-        border: none;
-        border-radius: 8px;
-        font-size: 16px;
-        font-weight: 600;
-        cursor: pointer;
-        margin-top: 24px;
-      ">Go Back</button>
+      <div style="display:flex; flex-wrap: wrap; gap:10px; margin-top:12px;">
+        <button onclick="window.history.back()" style="
+          padding: 12px 16px;
+          background: rgba(255,255,255,0.14);
+          color: white;
+          border: 1px solid rgba(255,255,255,0.2);
+          border-radius: 10px;
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          flex:1 1 120px;
+        ">Go Back</button>
+        <button id="focufyQuizUnlock" style="
+          padding: 12px 16px;
+          background: linear-gradient(135deg, #48bb78, #38a169);
+          color: white;
+          border: none;
+          border-radius: 10px;
+          font-size: 14px;
+          font-weight: 700;
+          cursor: pointer;
+          flex:1 1 160px;
+        ">Pass quiz to unlock</button>
+        <button id="focufyReasonBtn" style="
+          padding: 12px 16px;
+          background: linear-gradient(135deg, #667eea, #5a67d8);
+          color: white;
+          border: none;
+          border-radius: 10px;
+          font-size: 14px;
+          font-weight: 700;
+          cursor: pointer;
+          flex:1 1 160px;
+        ">Reason with AI</button>
+      </div>
     </div>
   `;
+  
+  // Wire quiz + reasoning
+  setTimeout(() => {
+    const quizBtn = document.getElementById('focufyQuizUnlock');
+    const reasonBtn = document.getElementById('focufyReasonBtn');
+    if (quizBtn) quizBtn.onclick = () => showQuizModal();
+    if (reasonBtn) reasonBtn.onclick = () => {
+      toggleChatPanel();
+      submitChat('Explain why this page was blocked and if it can be allowed. Provide guidance to proceed.');
+    };
+  }, 50);
   
   // Append to body
   if (document.body) {
