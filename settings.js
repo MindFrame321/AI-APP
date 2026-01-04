@@ -93,15 +93,25 @@ function renderDomainList(listId, domains) {
 }
 
 function addDomain(listType, domain) {
-  domain = domain.trim().toLowerCase();
+  domain = domain.trim();
   
   if (!domain) {
     showStatus('Please enter a domain', 'error');
     return;
   }
   
-  domain = domain.replace(/^https?:\/\//, '');
-  domain = domain.split('/')[0];
+  // Extract domain from URL if full URL provided
+  domain = domain.replace(/^https?:\/\//, ''); // Remove protocol
+  domain = domain.split('/')[0]; // Remove path
+  domain = domain.split('?')[0]; // Remove query params
+  domain = domain.split('#')[0]; // Remove hash
+  domain = domain.toLowerCase().replace(/^www\./, ''); // Normalize: lowercase, remove www
+  domain = domain.trim();
+  
+  if (!domain) {
+    showStatus('Please enter a valid domain', 'error');
+    return;
+  }
   
   if (!currentSettings[listType]) {
     currentSettings[listType] = [];
@@ -120,6 +130,9 @@ function addDomain(listType, domain) {
   
   const inputId = listType === 'alwaysAllow' ? 'alwaysAllowInput' : 'alwaysBlockInput';
   document.getElementById(inputId).value = '';
+  
+  // Auto-save settings
+  saveSettings();
 }
 
 function removeDomain(listType, domain) {
@@ -130,6 +143,9 @@ function removeDomain(listType, domain) {
     listType === 'alwaysAllow' ? 'alwaysAllowList' : 'alwaysBlockList',
     currentSettings[listType]
   );
+  
+  // Auto-save settings
+  saveSettings();
 }
 
 async function saveSettings() {

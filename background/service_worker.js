@@ -267,22 +267,30 @@ async function analyzeAndBlockPage(tabId, url) {
   
   try {
     const urlObj = new URL(url);
-    const domain = urlObj.hostname;
+    let domain = urlObj.hostname.toLowerCase().replace(/^www\./, ''); // Normalize: lowercase, remove www
     console.log('Analyzing page:', domain, 'Task:', currentSession.taskDescription);
     
     // Check always-allow list
     const settings = await getSettings();
     console.log('Settings loaded, API Key present:', !!settings.apiKey);
+    console.log('Always Allow list:', settings.alwaysAllow);
+    console.log('Always Block list:', settings.alwaysBlock);
     
-    if (settings.alwaysAllow && settings.alwaysAllow.includes(domain)) {
+    // Normalize domains in lists for comparison
+    const normalizeDomain = (d) => d.toLowerCase().replace(/^www\./, '').trim();
+    const normalizedAlwaysAllow = (settings.alwaysAllow || []).map(normalizeDomain);
+    const normalizedAlwaysBlock = (settings.alwaysBlock || []).map(normalizeDomain);
+    
+    if (normalizedAlwaysAllow.includes(domain)) {
       // Always allowed - don't block anything
+      console.log('✅ Domain is in always-allow list, clearing all blocks');
       chrome.tabs.sendMessage(tabId, { action: 'clearBlocks' }).catch(() => {});
       return;
     }
     
-    // Check always-block list
-    if (settings.alwaysBlock && settings.alwaysBlock.includes(domain)) {
+    if (normalizedAlwaysBlock.includes(domain)) {
       // Block entire page
+      console.log('🚫 Domain is in always-block list, blocking entire page');
       chrome.tabs.sendMessage(tabId, {
         action: 'blockPage',
         reason: 'always-blocked'

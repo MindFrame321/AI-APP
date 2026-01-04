@@ -889,15 +889,19 @@ async function signInWithGoogle() {
     console.log('Steps:');
     console.log('1. Go to: https://console.cloud.google.com/apis/credentials');
     console.log(`2. Click on client: ${clientId}`);
-    console.log(`3. Under "Authorized redirect URIs", add: ${redirectUri}`);
-    console.log('4. Click SAVE');
-    console.log('5. Wait 2-3 minutes, then try again');
+    console.log(`3. Under "Authorized redirect URIs", click "+ ADD URI"`);
+    console.log(`4. Copy the ENTIRE URL including https:// : ${redirectUri}`);
+    console.log('5. Paste it exactly as shown (must include https://)');
+    console.log('6. Click SAVE');
+    console.log('7. Wait 2-3 minutes, then try again');
     console.log('═══════════════════════════════════════════════════════');
     console.log(`Using Client ID: ${clientId}`);
+    console.log(`⚠️ IMPORTANT: Copy the ENTIRE redirect URI including https://`);
+    console.log(`Redirect URI: ${redirectUri}`);
     
     // Show in status message for visibility (but don't block if client ID is set)
     if (!clientIdInput?.value?.trim()) {
-      showStatus(`⚠️ Add redirect URI first!\n\n${redirectUri}\n\nSee console (F12) for steps`, 'error');
+      showStatus(`⚠️ Add redirect URI first!\n\nCopy ENTIRE URL:\n${redirectUri}\n\nSee console (F12) for steps`, 'error');
       // Small delay to let user see the message
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
@@ -1003,7 +1007,7 @@ async function signInWithGoogle() {
       const redirectUri = chrome.identity.getRedirectURL();
       const setupUrl = 'https://console.cloud.google.com/apis/credentials';
       
-      errorMessage = `❌ Redirect URI Not Configured\n\nYour Extension ID: ${extensionId}\nYour Redirect URI: ${redirectUri}\nYour Client ID: ${clientId || 'Not set'}\n\n✅ SOLUTION:\n1. Go to: ${setupUrl}\n2. Click on OAuth client: ${clientId || 'YOUR_CLIENT_ID'}\n3. Under "Authorized redirect URIs", click "+ ADD URI"\n4. Paste this EXACT URL: ${redirectUri}\n5. Click "SAVE"\n6. Wait 2-3 minutes for changes to propagate\n7. Try signing in again\n\n⚠️ IMPORTANT: Each user (you and your friend) needs to add their own redirect URI!`;
+      errorMessage = `❌ Redirect URI Not Configured\n\nYour Extension ID: ${extensionId}\nYour Redirect URI: ${redirectUri}\nYour Client ID: ${clientId || 'Not set'}\n\n✅ SOLUTION:\n1. Go to: ${setupUrl}\n2. Click on OAuth client: ${clientId || 'YOUR_CLIENT_ID'}\n3. Under "Authorized redirect URIs", click "+ ADD URI"\n4. Copy the ENTIRE URL including https:// : ${redirectUri}\n5. Paste it exactly as shown (must include https://)\n6. Click "SAVE"\n7. Wait 2-3 minutes for changes to propagate\n8. Try signing in again\n\n⚠️ IMPORTANT: Copy the ENTIRE URL including https://\n⚠️ Each user (you and your friend) needs to add their own redirect URI!`;
       
       console.error('❌ Redirect URI mismatch');
       console.error('Extension ID:', extensionId);
@@ -1015,7 +1019,7 @@ async function signInWithGoogle() {
       const redirectUri = chrome.identity.getRedirectURL();
       const setupUrl = 'https://console.cloud.google.com/apis/credentials';
       
-      errorMessage = `❌ Invalid Request\n\nThis usually means the redirect URI is missing from your OAuth client.\n\nYour Redirect URI: ${redirectUri}\nYour Client ID: ${clientId || 'Not set'}\n\n✅ SOLUTION:\n1. Go to: ${setupUrl}\n2. Click on OAuth client: ${clientId || 'YOUR_CLIENT_ID'}\n3. Under "Authorized redirect URIs", add: ${redirectUri}\n4. Click "SAVE" and wait 2-3 minutes`;
+      errorMessage = `❌ Invalid Request\n\nThis usually means the redirect URI is missing from your OAuth client.\n\nYour Redirect URI: ${redirectUri}\nYour Client ID: ${clientId || 'Not set'}\n\n✅ SOLUTION:\n1. Go to: ${setupUrl}\n2. Click on OAuth client: ${clientId || 'YOUR_CLIENT_ID'}\n3. Under "Authorized redirect URIs", click "+ ADD URI"\n4. Copy the ENTIRE URL including https:// : ${redirectUri}\n5. Paste it exactly as shown (must include https://)\n6. Click "SAVE" and wait 2-3 minutes\n\n⚠️ IMPORTANT: Copy the ENTIRE URL including https://`;
       
       console.error('❌ Invalid request - likely missing redirect URI');
       console.error('Redirect URI:', redirectUri);
