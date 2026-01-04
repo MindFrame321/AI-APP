@@ -237,6 +237,13 @@
             rows="3"
           ></textarea>
           <p class="input-hint">Be specific! This helps AI show only relevant content.</p>
+          <div class="input-group">
+            <button id="decomposeBtn" class="btn btn-secondary" type="button">Break into subgoals</button>
+          </div>
+          <div id="subgoalContainer" class="subgoal-container hidden">
+            <div class="subgoal-title">Checklist</div>
+            <ul id="subgoalList" class="subgoal-list"></ul>
+          </div>
         </div>
 
         <div class="form-group">

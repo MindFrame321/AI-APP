@@ -4,6 +4,7 @@
 
 let updateInterval = null;
 let currentSession = null; // Track current session state
+let subgoals = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
   try {
@@ -120,12 +121,17 @@ function showActiveSession(session) {
   document.getElementById('sessionInactive').classList.add('hidden');
   
   document.getElementById('activeTask').textContent = `"${session.taskDescription}"`;
+  if (session.subgoals && session.subgoals.length > 0) {
+    subgoals = session.subgoals;
+    renderSubgoals(true);
+  }
   updateRemainingTime();
 }
 
 function showInactiveSession() {
   document.getElementById('sessionActive').classList.add('hidden');
   document.getElementById('sessionInactive').classList.remove('hidden');
+  renderSubgoals(false);
 }
 
 async function updateRemainingTime() {
@@ -230,6 +236,15 @@ function setupEventListeners() {
       return false;
     };
     console.log('✅ Logout button listener attached');
+  }
+  
+  // Goal decomposition
+  const decomposeBtn = document.getElementById('decomposeBtn');
+  if (decomposeBtn) {
+    decomposeBtn.onclick = async (e) => {
+      e.preventDefault();
+      await decomposeGoal();
+    };
   }
   
   // OAuth Client ID input - save on blur
@@ -669,7 +684,9 @@ async function startSession() {
     const response = await chrome.runtime.sendMessage({
       action: 'startSession',
       taskDescription,
-      durationMinutes
+      durationMinutes,
+      subgoals,
+      energyTag: null
     });
     
     console.log('Start session response:', response);
@@ -680,7 +697,8 @@ async function startSession() {
       currentSession = {
         taskDescription,
         durationMinutes,
-        active: true
+        active: true,
+        subgoals
       };
       // Update UI immediately
       showActiveSession({ taskDescription, active: true, endTime: Date.now() + durationMinutes * 60000 });
@@ -789,6 +807,59 @@ async function confirmEndSession() {
     console.error('Error ending session:', error);
     showStatus('Error ending session: ' + error.message, 'error');
   }
+}
+
+async function decomposeGoal() {
+  const taskInput = document.getElementById('taskInput');
+  const goal = taskInput.value.trim();
+  if (!goal) {
+    showStatus('Enter a goal first', 'error');
+    return;
+  }
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'decomposeGoal', goal });
+    if (resp?.success && resp.subgoals) {
+      subgoals = resp.subgoals.map(s => ({ text: s.text || s, done: s.done || false }));
+      renderSubgoals(false);
+      showStatus('Subgoals ready', 'success');
+    } else {
+      showStatus(resp?.error || 'Could not generate subgoals', 'error');
+    }
+  } catch (e) {
+    console.error('Decompose error', e);
+    showStatus('Error creating subgoals', 'error');
+  }
+}
+
+function renderSubgoals(disableInput) {
+  const container = document.getElementById('subgoalContainer');
+  const list = document.getElementById('subgoalList');
+  if (!container || !list) return;
+  if (!subgoals || subgoals.length === 0) {
+    container.classList.add('hidden');
+    list.innerHTML = '';
+    return;
+  }
+  container.classList.remove('hidden');
+  list.innerHTML = '';
+  subgoals.forEach((sg, idx) => {
+    const li = document.createElement('li');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!sg.done;
+    cb.disabled = !!disableInput;
+    cb.addEventListener('change', async () => {
+      subgoals[idx].done = cb.checked;
+      if (disableInput) {
+        await chrome.runtime.sendMessage({ action: 'toggleSubgoal', index: idx, done: cb.checked });
+      }
+    });
+    const span = document.createElement('span');
+    span.textContent = sg.text || '';
+    li.appendChild(cb);
+    li.appendChild(span);
+    list.appendChild(li);
+  });
 }
 
 async function savePassword() {

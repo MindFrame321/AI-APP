@@ -212,6 +212,36 @@ header h1 {
   line-height: 1.4;
 }
 
+.subgoal-container {
+  margin-top: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.subgoal-title {
+  font-size: 13px;
+  color: #475569;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.subgoal-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.subgoal-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  color: #0f172a;
+}
+
 /* Buttons */
 .btn {
   width: 100%;

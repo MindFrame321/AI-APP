@@ -178,6 +178,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ choice });
     });
     return true; // Keep channel open for async response
+  } else if (request.action === 'pauseTax') {
+    showPauseTaxOverlay(request.goal, request.delayMs, request.elapsed);
+    sendResponse({ success: true });
   }
   return true;
 });
@@ -531,6 +534,59 @@ async function submitQuizAnswer() {
     feedback.style.color = '#f56565';
     feedback.textContent = 'Incorrect. Try again or ask the Coach.';
   }
+}
+
+function showPauseTaxOverlay(goal, delayMs = 5000, elapsedMinutes = 0) {
+  if (!document.body) return;
+  let overlay = document.getElementById('focufy-pause-tax');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'focufy-pause-tax';
+    overlay.style.cssText = `
+      position: fixed; inset: 0; z-index: 9999999; background: rgba(0,0,0,0.55);
+      display:flex; align-items:center; justify-content:center; padding:16px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    `;
+    overlay.innerHTML = `
+      <div style="background:#0f172a; color:#e2e8f0; width:min(520px,100%); border-radius:16px; padding:20px; box-shadow:0 30px 80px rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.12);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div>
+            <div style="font-size:16px; font-weight:700;">Hold up—stay focused?</div>
+            <div style="font-size:12px; opacity:0.75;">Current goal: <span id="pauseGoal"></span></div>
+          </div>
+          <div id="pauseCountdown" style="font-weight:700; color:#f6ad55;">--</div>
+        </div>
+        <div style="font-size:13px; opacity:0.8; margin-bottom:12px;">Elapsed: <span id="pauseElapsed"></span> min</div>
+        <div style="display:flex; gap:8px;">
+          <button id="pauseStay" class="focufy-btn primary" style="flex:1; background:linear-gradient(135deg,#667eea,#5a67d8); color:white; border:none; padding:10px 12px; border-radius:12px; cursor:pointer;">Stay Focused</button>
+          <button id="pauseBreak" class="focufy-btn secondary" style="flex:1; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); color:#e2e8f0; padding:10px 12px; border-radius:12px; cursor:pointer;">Break Focus</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  }
+  overlay.style.display = 'flex';
+  const goalEl = document.getElementById('pauseGoal');
+  const elapsedEl = document.getElementById('pauseElapsed');
+  const countdownEl = document.getElementById('pauseCountdown');
+  if (goalEl) goalEl.textContent = goal || 'Your goal';
+  if (elapsedEl) elapsedEl.textContent = elapsedMinutes || 0;
+  let remaining = Math.max(1, Math.round(delayMs / 1000));
+  if (countdownEl) countdownEl.textContent = `${remaining}s`;
+  const interval = setInterval(() => {
+    remaining -= 1;
+    if (countdownEl) countdownEl.textContent = `${remaining}s`;
+    if (remaining <= 0) clearInterval(interval);
+  }, 1000);
+  const stayBtn = document.getElementById('pauseStay');
+  const breakBtn = document.getElementById('pauseBreak');
+  if (stayBtn) stayBtn.onclick = () => {
+    overlay.style.display = 'none';
+    chrome.runtime.sendMessage({ action: 'pauseTaxDecision', choice: 'stay' }).catch(() => {});
+  };
+  if (breakBtn) breakBtn.onclick = () => {
+    overlay.style.display = 'none';
+    chrome.runtime.sendMessage({ action: 'pauseTaxDecision', choice: 'break' }).catch(() => {});
+  };
 }
 
 

@@ -109,37 +109,119 @@
         </div>
       </section>
 
-      <!-- Feature Flags -->
+      <!-- Feature Flags reorganized -->
       <section class="settings-section">
-        <h2>Feature Flags</h2>
-        <p class="section-description">Enable optional features. All default to OFF.</p>
-        <div class="form-group">
+        <h2>Shape the Session</h2>
+        <p class="section-description">How your focus sessions are structured</p>
+        <div class="flag-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="goalDecompositionEnabled">
+            <span><strong>Goal Decomposition</strong></span>
+          </label>
+          <p class="flag-desc">Breaks your goal into small, checkable steps</p>
+        </div>
+        <div class="flag-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="energyModeEnabled">
+            <span><strong>Energy-Based Focus Mode</strong></span>
+          </label>
+          <p class="flag-desc">Adapts sessions to your energy level</p>
+        </div>
+        <div class="flag-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="sessionReflectionEnabled">
+            <span><strong>Session Reflection</strong></span>
+          </label>
+          <p class="flag-desc">One quick question at the end to lock in learning</p>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>See What’s Really Happening</h2>
+        <p class="section-description">Understand your focus patterns over time</p>
+        <div class="flag-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="focusQualityEnabled">
+            <span><strong>Focus Quality Signals</strong></span>
+          </label>
+          <p class="flag-desc">Shows interruptions, idle time, and a focus score</p>
+        </div>
+        <div class="flag-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="narrativeAnalyticsEnabled">
+            <span><strong>Narrative Analytics</strong></span>
+          </label>
+          <p class="flag-desc">Turns stats into plain-English insights</p>
+        </div>
+        <div class="flag-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="learningFeedEnabled">
+            <span><strong>Learning Feed</strong></span>
+          </label>
+          <p class="flag-desc">Timeline of what you worked on and learned</p>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>Control Distractions</h2>
+        <p class="section-description">How strict Focufy should be during focus</p>
+        <div class="flag-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="contextualBlockingEnabled">
+            <span><strong>Contextual Blocking Rules</strong></span>
+          </label>
+          <p class="flag-desc">Blocks or allows sites based on your goal</p>
+        </div>
+        <div class="flag-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="pauseTaxEnabled">
+            <span><strong>Pause Tax</strong></span>
+          </label>
+          <p class="flag-desc">Adds a short delay before breaking focus</p>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>Accountability (Private)</h2>
+        <p class="section-description">Commitments only you can see</p>
+        <div class="flag-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="personalContractsEnabled">
+            <span><strong>Personal Contracts</strong></span>
+          </label>
+          <p class="flag-desc">Private promises you make and track</p>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>AI & Data</h2>
+        <p class="section-description">What runs locally vs with AI</p>
+        <div class="flag-item">
           <label class="checkbox-label">
             <input type="checkbox" id="aiFeaturesEnabled">
-            <span>AI Features Enabled (gate all AI calls)</span>
+            <span><strong>AI Features Enabled</strong></span>
           </label>
+          <p class="flag-desc">Required for any AI-powered features</p>
         </div>
-        <div class="flags-grid">
-          <label class="checkbox-label"><input type="checkbox" id="goalDecompositionEnabled"><span>Goal Decomposition</span></label>
-          <label class="checkbox-label"><input type="checkbox" id="focusQualityEnabled"><span>Focus Quality Signals</span></label>
-          <label class="checkbox-label"><input type="checkbox" id="contextualBlockingEnabled"><span>Contextual Blocking Rules</span></label>
-          <label class="checkbox-label"><input type="checkbox" id="sessionReflectionEnabled"><span>Session Reflection</span></label>
-          <label class="checkbox-label"><input type="checkbox" id="passiveCoachEnabled"><span>Passive Focus Coach</span></label>
-          <label class="checkbox-label"><input type="checkbox" id="narrativeAnalyticsEnabled"><span>Narrative Analytics</span></label>
-          <label class="checkbox-label"><input type="checkbox" id="personalContractsEnabled"><span>Personal Contracts</span></label>
-          <label class="checkbox-label"><input type="checkbox" id="pauseTaxEnabled"><span>Pause Tax</span></label>
-          <label class="checkbox-label"><input type="checkbox" id="learningFeedEnabled"><span>Learning Feed</span></label>
-          <label class="checkbox-label"><input type="checkbox" id="energyModeEnabled"><span>Energy-Based Focus Mode</span></label>
+        <div class="flag-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="passiveCoachEnabled">
+            <span><strong>Passive Focus Coach</strong></span>
+          </label>
+          <p class="flag-desc">Explains or quizzes you only when focus drops</p>
+        </div>
+        <div class="flag-item">
           <label class="checkbox-label">
             <input type="checkbox" id="dataRetentionEnabled">
-            <span>Data Retention</span>
+            <span><strong>Data Retention</strong></span>
           </label>
-          <div class="input-group" style="max-width:240px;">
+          <p class="flag-desc">Automatically deletes old session data after X days</p>
+          <div class="input-group" style="max-width:240px; margin-top:6px;">
             <label for="dataRetentionDays" class="input-label">Retention Days</label>
             <input type="number" id="dataRetentionDays" min="7" max="365" value="90">
           </div>
         </div>
-        <p class="help-text">Data Collection: When enabled, focus stats and learning data stay on-device unless you explicitly use AI features.</p>
+        <p class="help-text">Data Collection: focus stats and learning data stay on-device unless you explicitly enable AI calls.</p>
         <div class="actions" style="margin-top:12px;">
           <button id="exportDataBtn" class="btn btn-secondary">Export Data (JSON)</button>
           <button id="clearDataBtn" class="btn btn-danger">Clear Data</button>

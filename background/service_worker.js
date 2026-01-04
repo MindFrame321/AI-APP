@@ -21,12 +21,21 @@ let learningData = {
   topicFrequency: {}      // How often each topic appears
 };
 
+// Session metrics (focus quality)
+let sessionMetrics = {
+  tabSwitches: 0,
+  blockedAttempts: 0,
+  idleSeconds: 0
+};
+let lastActivityTs = Date.now();
+
 // Rate limiting
 let apiCallQueue = [];
 let isProcessingQueue = false;
 let lastApiCallTime = 0;
 const MIN_API_CALL_INTERVAL = 2000; // Minimum 2 seconds between API calls
 const MAX_QUEUE_SIZE = 10;
+const pauseTimers = new Map();
 
 // Current supported model
 const CURRENT_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent';
@@ -92,6 +101,19 @@ chrome.runtime.onStartup.addListener(async () => {
   console.log('Focufy started');
   await migrateSettings();
   await loadSessionState();
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'idleTick' && currentSession?.active) {
+    const now = Date.now();
+    const gap = now - lastActivityTs;
+    if (gap > 60000) {
+      sessionMetrics.idleSeconds += Math.floor(gap / 1000);
+    }
+    lastActivityTs = now;
+    // Persist live metrics
+    chrome.storage.local.set({ session: { ...currentSession, metrics: sessionMetrics } }).catch(() => {});
+  }
 });
 
 // Migrate settings to fix deprecated model URLs
@@ -177,6 +199,8 @@ async function loadSessionState() {
   
   if (result.session) {
     currentSession = result.session;
+    sessionMetrics = currentSession.metrics || sessionMetrics;
+    lastActivityTs = Date.now();
     console.log('[loadSessionState] Session loaded:', currentSession);
     console.log('[loadSessionState] Session active:', currentSession.active);
     console.log('[loadSessionState] Current time:', Date.now());
@@ -214,7 +238,10 @@ async function loadSessionState() {
 }
 
 // Start focus session
-async function startSession(taskDescription, durationMinutes) {
+async function startSession(taskDescription, durationMinutes, subgoals = [], energyTag = null) {
+  sessionMetrics = { tabSwitches: 0, blockedAttempts: 0, idleSeconds: 0 };
+  lastActivityTs = Date.now();
+
   // Initialize learning data for new session
   learningData = {
     mainTopic: taskDescription.toLowerCase(),
@@ -246,7 +273,10 @@ async function startSession(taskDescription, durationMinutes) {
     startTime,
     endTime,
     durationMinutes,
-    active: true
+    active: true,
+    subgoals,
+    metrics: sessionMetrics,
+    energyTag
   };
   
   console.log('[startSession] Creating session:', currentSession);
@@ -259,6 +289,7 @@ async function startSession(taskDescription, durationMinutes) {
   
   chrome.alarms.create('sessionEnd', { when: endTime });
   startSessionMonitoring();
+  startIdleMonitor();
   
   // Apply blocking rules for always-block list (works independently of session)
   const settings = await getSettings();
@@ -307,6 +338,7 @@ async function endSession() {
   
   try {
   if (currentSession) {
+    currentSession.metrics = sessionMetrics;
     // Track session completion
     await trackSessionEnd(currentSession);
     }
@@ -314,6 +346,8 @@ async function endSession() {
     console.error('Error tracking session end:', error);
     // Continue with cleanup even if tracking fails
   }
+  
+  stopIdleMonitor();
   
   // Clear session state
   const wasActive = currentSession !== null;
@@ -399,6 +433,54 @@ function normalizeDomain(d) {
   return normalized || '';
 }
 
+// Contextual rules evaluation
+function evaluateContextualRules(rules, url, session) {
+  if (!rules || rules.length === 0) return null;
+  const urlObj = new URL(url);
+  const domain = normalizeDomain(urlObj.hostname);
+  const path = urlObj.pathname || '';
+  const goal = (session?.taskDescription || '').toLowerCase();
+
+  for (const rule of rules) {
+    if (!rule || rule.disabled) continue;
+    switch (rule.type) {
+      case 'allowIfDomainMatchesGoalKeywords':
+        if (goal && domain && goal.split(/\s+/).some(k => k && domain.includes(k))) {
+          return 'allow';
+        }
+        break;
+      case 'allowIfYoutubeVideoUnderMinutes':
+        if (domain.includes('youtube.com') && path.includes('/watch')) {
+          const limit = parseInt(rule.limitMinutes || '0', 10);
+          if (!isNaN(limit) && limit > 0) {
+            return 'allow';
+          }
+        }
+        break;
+      case 'allowOnlySubredditListDuringSession':
+        if (domain.includes('reddit.com')) {
+          const allowed = (rule.subreddits || []).map(s => s.toLowerCase());
+          const match = path.toLowerCase().match(/\/r\/([^/]+)/);
+          if (match && allowed.length > 0) {
+            if (!allowed.includes(match[1])) return 'block';
+          }
+        }
+        break;
+      case 'blockAfterMinutesIntoSession':
+        if (session?.startTime && rule.minutes) {
+          const elapsedMin = Math.floor((Date.now() - session.startTime) / 60000);
+          if (elapsedMin >= rule.minutes) {
+            return 'block';
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return null;
+}
+
 // Build a DNR rule that blocks the domain and its subdomains
 function makeDomainBlockRule(id, hostname) {
   // This matches both the domain and any subdomain using regexFilter
@@ -457,6 +539,45 @@ async function applyBlockedSites(blockedHostnames) {
   }
 }
 
+async function handlePauseTax(tabId, targetUrl, reason) {
+  const settings = await getSettings();
+  if (!settings.pauseTaxEnabled) {
+    try {
+      await chrome.tabs.update(tabId, {
+        url: chrome.runtime.getURL(`blocked.html?reason=${encodeURIComponent(reason)}&url=${encodeURIComponent(targetUrl)}`)
+      });
+    } catch (e) {
+      console.error('[PauseTax] Redirect failed:', e);
+    }
+    return;
+  }
+  
+  const delayMs = (settings.pauseTaxDelaySeconds || 5) * 1000;
+  pauseTimers.set(tabId, 'pending');
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      action: 'pauseTax',
+      delayMs,
+      goal: currentSession?.taskDescription || 'Your goal',
+      elapsed: Math.floor((Date.now() - (currentSession?.startTime || Date.now())) / 60000)
+    });
+  } catch (e) {
+    console.warn('[PauseTax] Could not show overlay, fallback block:', e);
+  }
+  
+  setTimeout(async () => {
+    if (pauseTimers.get(tabId) === 'break') return; // user chose to break
+    pauseTimers.delete(tabId);
+    try {
+      await chrome.tabs.update(tabId, {
+        url: chrome.runtime.getURL(`blocked.html?reason=${encodeURIComponent(reason)}&url=${encodeURIComponent(targetUrl)}`)
+      });
+    } catch (err) {
+      console.error('[PauseTax] Redirect failed:', err);
+    }
+  }, delayMs);
+}
+
 // Clear all blocking rules
 async function clearBlockedSites() {
   if (!chrome.declarativeNetRequest) {
@@ -510,7 +631,15 @@ async function shouldBlockDomain(url) {
     console.log('[shouldBlockDomain] Normalized always-block list:', normalizedAlwaysBlock);
     console.log('[shouldBlockDomain] Is domain in list?', normalizedAlwaysBlock.includes(domain));
     
-    const result = normalizedAlwaysBlock.includes(domain);
+    let result = normalizedAlwaysBlock.includes(domain);
+    if (settings.contextualBlockingEnabled) {
+      const ctxDecision = evaluateContextualRules(settings.contextualRules || [], url, currentSession);
+      if (ctxDecision === 'allow') result = false;
+      if (ctxDecision === 'block') result = true;
+    }
+    if (result && currentSession?.active) {
+      sessionMetrics.blockedAttempts += 1;
+    }
     console.log('[shouldBlockDomain] Result:', result);
     return result;
   } catch (e) {
@@ -567,15 +696,7 @@ function setupWebNavigationListeners() {
         
         if (isBlocked) {
           console.log('[WebNav] 🚫 Domain is blocked (always-block):', host);
-          // DNR should handle this at network level, but redirect as backup
-          try {
-            await chrome.tabs.update(details.tabId, {
-              url: chrome.runtime.getURL(`blocked.html?reason=always-blocked&url=${encodeURIComponent(details.url)}`)
-            });
-            console.log('[WebNav] ✅ Redirect successful (backup)');
-          } catch (err) {
-            console.error('[WebNav] ❌ Redirect failed:', err);
-          }
+          await handlePauseTax(details.tabId, details.url, 'always-blocked');
           return;
         }
       }
@@ -596,15 +717,7 @@ function setupWebNavigationListeners() {
       const domain = normalizeDomain(urlObj.hostname);
       console.log('[WebNav] 🚫 BLOCKING domain (session-based):', domain, 'URL:', details.url);
       
-      // Redirect IMMEDIATELY - this happens before page loads
-      try {
-        await chrome.tabs.update(details.tabId, {
-          url: chrome.runtime.getURL(`blocked.html?reason=always-blocked&url=${encodeURIComponent(details.url)}`)
-        });
-        console.log('[WebNav] ✅ Redirect successful');
-      } catch (err) {
-        console.error('[WebNav] ❌ Redirect failed:', err);
-      }
+      await handlePauseTax(details.tabId, details.url, 'always-blocked');
       return;
     }
   });
@@ -685,6 +798,14 @@ function setupWebNavigationListeners() {
       await analyzeAndBlockPage(tabId, tab.url);
     }
   });
+
+  // Track tab switches for focus quality
+  chrome.tabs.onActivated.addListener(() => {
+    if (currentSession?.active) {
+      sessionMetrics.tabSwitches += 1;
+      lastActivityTs = Date.now();
+    }
+  });
   
   enforceAntiTampering();
   
@@ -695,6 +816,23 @@ function setupWebNavigationListeners() {
 // Start monitoring (just ensures listeners are set up)
 function startSessionMonitoring() {
   setupWebNavigationListeners();
+}
+
+function startIdleMonitor() {
+  try {
+    chrome.alarms.clear('idleTick');
+    chrome.alarms.create('idleTick', { periodInMinutes: 1 });
+  } catch (e) {
+    console.warn('[Idle] Failed to start idle monitor:', e);
+  }
+}
+
+function stopIdleMonitor() {
+  try {
+    chrome.alarms.clear('idleTick');
+  } catch (e) {
+    console.warn('[Idle] Failed to stop idle monitor:', e);
+  }
 }
 
 // Analyze page and block irrelevant elements - SIMPLIFIED VERSION
@@ -2686,6 +2824,75 @@ async function generateQuizQuestion(tabId) {
   };
 }
 
+// Goal decomposition helper
+async function decomposeGoal(goal) {
+  const settings = await getSettings();
+  if (!goal || !settings.goalDecompositionEnabled) {
+    return [];
+  }
+  if (!settings.aiFeaturesEnabled) {
+    return simpleSubgoals(goal);
+  }
+  const apiKey = settings?.apiKey || DEFAULT_API_KEY;
+  const backendUrl = settings?.backendUrl;
+  const tokenResult = await chrome.storage.local.get(['authToken']);
+  const authToken = tokenResult.authToken;
+  const prompt = `Break this study goal into 3-5 short, actionable checkpoints. Respond ONLY with a numbered list.
+
+Goal: "${goal}"`;
+
+  try {
+    if (!backendUrl && !apiKey) {
+      return simpleSubgoals(goal);
+    }
+    let response;
+    if (backendUrl && authToken) {
+      response = await makeRateLimitedApiCall(() =>
+        fetch(backendUrl + '/api/analyze-page', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ prompt })
+        })
+      );
+    } else {
+      let apiUrl = settings?.apiUrl || CURRENT_MODEL_URL;
+      response = await makeRateLimitedApiCall(() =>
+        fetch(`${apiUrl}?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 200 }
+          })
+        })
+      );
+    }
+    if (!response.ok) {
+      throw new Error(`Decomposition error: ${response.status}`);
+    }
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || data.text || '';
+    const lines = text.split(/\n+/).map(l => l.replace(/^\d+[\).\s-]*/, '').trim()).filter(Boolean);
+    return lines.map(t => ({ text: t, done: false }));
+  } catch (e) {
+    console.warn('[Decompose] Falling back:', e);
+    return simpleSubgoals(goal);
+  }
+}
+
+function simpleSubgoals(goal) {
+  const parts = goal.split(/[.,;]/).map(p => p.trim()).filter(Boolean);
+  const base = parts.length > 1 ? parts : [
+    `Research basics of ${goal}`,
+    `Practice 1–2 examples for ${goal}`,
+    `Summarize key points of ${goal}`
+  ];
+  return base.slice(0, 5).map(t => ({ text: t, done: false }));
+}
+
 // Chatbot handler
 async function handleChatbotQuestion({ question, tabId, selectionText, pageUrl }) {
   const settings = await getSettings();
@@ -2795,7 +3002,7 @@ function getRemainingTime() {
 // Handle messages
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'startSession') {
-    startSession(request.taskDescription, request.durationMinutes)
+    startSession(request.taskDescription, request.durationMinutes, request.subgoals || [], request.energyTag || null)
       .then(() => sendResponse({ success: true }))
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
@@ -2889,10 +3096,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'pageLoaded') {
     // New page loaded, analyze it
     if (currentSession?.active && sender.tab?.id) {
+      lastActivityTs = Date.now();
       analyzeAndBlockPage(sender.tab.id, sender.tab.url || '');
     }
     sendResponse({ success: true });
     return;
+  }
+
+  if (request.action === 'decomposeGoal') {
+    (async () => {
+      try {
+        const subgoals = await decomposeGoal(request.goal || '');
+        sendResponse({ success: true, subgoals });
+      } catch (error) {
+        console.error('[Decompose] Failed:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === 'toggleSubgoal') {
+    (async () => {
+      try {
+        if (currentSession?.subgoals && typeof request.index === 'number') {
+          currentSession.subgoals[request.index].done = !!request.done;
+          await chrome.storage.local.set({ session: currentSession });
+        }
+        sendResponse({ success: true, subgoals: currentSession?.subgoals || [] });
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
   }
 
   if (request.action === 'generateQuiz') {
@@ -2925,7 +3161,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     })();
     return true; // async
   }
-  
+
+  if (request.action === 'pauseTaxDecision') {
+    if (request.choice === 'break') {
+      pauseTimers.set(sender.tab?.id, 'break');
+      await endSession();
+      sendResponse({ success: true });
+      return true;
+    }
+    // stay focused: proceed to block now
+    pauseTimers.set(sender.tab?.id, 'stay');
+    if (sender.tab?.id && sender.tab.url) {
+      try {
+        await chrome.tabs.update(sender.tab.id, {
+          url: chrome.runtime.getURL(`blocked.html?reason=always-blocked&url=${encodeURIComponent(sender.tab.url)}`)
+        });
+      } catch (e) {
+        console.error('[PauseTax] Block redirect failed:', e);
+      }
+    }
+    sendResponse({ success: true });
+    return true;
+  }
+
   if (request.action === 'testBlock') {
     // Test action to force block current tab
     if (sender.tab?.id) {
