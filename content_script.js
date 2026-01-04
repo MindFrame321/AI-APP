@@ -433,12 +433,15 @@ async function submitChat(prefilled) {
   
   try {
     const selection = window.getSelection ? (window.getSelection().toString() || '') : '';
-    const response = await chrome.runtime.sendMessage({
-      action: 'chatbotQuestion',
-      question: text,
-      selectionText: selection.substring(0, 1500),
-      pageUrl: window.location.href
-    });
+    const response = await Promise.race([
+      chrome.runtime.sendMessage({
+        action: 'chatbotQuestion',
+        question: text,
+        selectionText: selection.substring(0, 1500),
+        pageUrl: window.location.href
+      }),
+      new Promise(resolve => setTimeout(() => resolve({ success: false, error: 'Timed out. Check AI settings/API key.' }), 12000))
+    ]);
     
     if (response?.success && response.answer) {
       thinkingEl.textContent = response.answer;
