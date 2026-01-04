@@ -268,34 +268,66 @@ async function analyzeAndBlockPage(tabId, url) {
   try {
     const urlObj = new URL(url);
     let domain = urlObj.hostname.toLowerCase().replace(/^www\./, ''); // Normalize: lowercase, remove www
-    console.log('Analyzing page:', domain, 'Task:', currentSession.taskDescription);
+    console.log('[Analyze] Analyzing page:', domain, 'Task:', currentSession.taskDescription);
     
-    // Check always-allow list
+    // Check always-allow and always-block lists FIRST (before any other logic)
     const settings = await getSettings();
-    console.log('Settings loaded, API Key present:', !!settings.apiKey);
-    console.log('Always Allow list:', settings.alwaysAllow);
-    console.log('Always Block list:', settings.alwaysBlock);
+    console.log('[Analyze] Settings loaded, API Key present:', !!settings.apiKey);
+    console.log('[Analyze] Always Allow list (raw):', settings.alwaysAllow);
+    console.log('[Analyze] Always Block list (raw):', settings.alwaysBlock);
     
-    // Normalize domains in lists for comparison
-    const normalizeDomain = (d) => d.toLowerCase().replace(/^www\./, '').trim();
-    const normalizedAlwaysAllow = (settings.alwaysAllow || []).map(normalizeDomain);
-    const normalizedAlwaysBlock = (settings.alwaysBlock || []).map(normalizeDomain);
+    // Normalize domains in lists for comparison - handle all subdomains
+    const normalizeDomain = (d) => {
+      if (!d) return '';
+      let normalized = d.toLowerCase().trim();
+      // Remove protocol if present
+      normalized = normalized.replace(/^https?:\/\//, '');
+      // Remove path, query, hash
+      normalized = normalized.split('/')[0].split('?')[0].split('#')[0];
+      // Remove www. prefix
+      normalized = normalized.replace(/^www\./, '');
+      // Remove any trailing dots
+      normalized = normalized.replace(/\.$/, '');
+      return normalized;
+    };
     
-    if (normalizedAlwaysAllow.includes(domain)) {
+    const normalizedDomain = normalizeDomain(domain);
+    const normalizedAlwaysAllow = (settings.alwaysAllow || []).map(normalizeDomain).filter(d => d);
+    const normalizedAlwaysBlock = (settings.alwaysBlock || []).map(normalizeDomain).filter(d => d);
+    
+    console.log('[Analyze] Normalized domain:', normalizedDomain);
+    console.log('[Analyze] Normalized Always Allow list:', normalizedAlwaysAllow);
+    console.log('[Analyze] Normalized Always Block list:', normalizedAlwaysBlock);
+    
+    if (normalizedAlwaysAllow.includes(normalizedDomain)) {
       // Always allowed - don't block anything
-      console.log('✅ Domain is in always-allow list, clearing all blocks');
-      chrome.tabs.sendMessage(tabId, { action: 'clearBlocks' }).catch(() => {});
+      console.log('[Analyze] ✅ Domain is in always-allow list, clearing all blocks');
+      chrome.tabs.sendMessage(tabId, { action: 'clearBlocks' }).catch((err) => {
+        console.error('[Analyze] Error sending clearBlocks message:', err);
+      });
       return;
     }
     
-    if (normalizedAlwaysBlock.includes(domain)) {
-      // Block entire page
-      console.log('🚫 Domain is in always-block list, blocking entire page');
+    if (normalizedAlwaysBlock.includes(normalizedDomain)) {
+      // Block entire page - THIS MUST HAPPEN BEFORE ANY YOUTUBE-SPECIFIC CODE
+      console.log('[Analyze] 🚫 Domain is in always-block list, blocking entire page');
+      console.log('[Analyze] Sending blockPage message to tab:', tabId);
       chrome.tabs.sendMessage(tabId, {
         action: 'blockPage',
         reason: 'always-blocked'
-      }).catch(() => {});
-      return;
+      }).catch((err) => {
+        console.error('[Analyze] Error sending blockPage message:', err);
+        // If message fails, try injecting the block directly
+        chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          func: () => {
+            window.location.href = chrome.runtime.getURL('blocked.html?reason=always-blocked');
+          }
+        }).catch((scriptErr) => {
+          console.error('[Analyze] Error executing redirect script:', scriptErr);
+        });
+      });
+      return; // CRITICAL: Return early to prevent any other blocking logic
     }
     
     // Check cache - more aggressive caching

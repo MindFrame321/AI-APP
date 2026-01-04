@@ -202,20 +202,59 @@ function clearAllBlocks() {
 function blockEntirePage(reason) {
   console.log('[Focufy] blockEntirePage called, reason:', reason);
   console.log('[Focufy] Current session:', currentSession);
+  console.log('[Focufy] Document ready state:', document.readyState);
+  
+  // Force blocking to be active for always-blocked pages
+  if (reason === 'always-blocked') {
+    isBlockingActive = true;
+  }
   
   // Show blocked overlay
   showBlockedOverlay(reason);
   
-  // Also hide the body content
-  if (document.body) {
-    document.body.style.overflow = 'hidden';
-    // Hide all direct children of body except the overlay
-    Array.from(document.body.children).forEach(child => {
-      if (child.id !== 'focus-ai-overlay') {
-        child.style.display = 'none';
+  // Also hide the body content - more aggressive blocking
+  const hideAllContent = () => {
+    if (document.body) {
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'relative';
+      // Hide all direct children of body except the overlay
+      Array.from(document.body.children).forEach(child => {
+        if (child.id !== 'focus-ai-overlay') {
+          child.style.display = 'none';
+          child.style.visibility = 'hidden';
+        }
+      });
+      // Also hide html element content
+      if (document.documentElement) {
+        Array.from(document.documentElement.children).forEach(child => {
+          if (child.tagName !== 'BODY' && child.id !== 'focus-ai-overlay') {
+            child.style.display = 'none';
+            child.style.visibility = 'hidden';
+          }
+        });
       }
-    });
+    }
+  };
+  
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', hideAllContent);
+  } else {
+    hideAllContent();
   }
+  
+  // Also watch for dynamically added content and hide it
+  if (window.focusAIObserver) {
+    window.focusAIObserver.disconnect();
+  }
+  
+  window.focusAIObserver = new MutationObserver(() => {
+    hideAllContent();
+  });
+  
+  window.focusAIObserver.observe(document.body || document.documentElement, {
+    childList: true,
+    subtree: true
+  });
   
   console.log('[Focufy] ✅ Page blocked successfully');
 }
