@@ -38,8 +38,20 @@ const DEFAULT_API_KEY = 'AIzaSyDtmZYEgp9XwqIO4VgCE8J2QH7IIE_gJt4';
   await migrateSettings();
   await loadSessionState();
   
-  // Set up webNavigation listeners immediately (they check session state internally)
+  // Set up webNavigation listeners immediately
   setupWebNavigationListeners();
+  
+  // Apply blocking rules from storage on startup (works independently of session)
+  const settings = await getSettings();
+  if (settings.alwaysBlock && settings.alwaysBlock.length > 0) {
+    const normalizedBlocked = settings.alwaysBlock
+      .map(d => normalizeToHostname(d))
+      .filter(h => h);
+    if (normalizedBlocked.length > 0) {
+      console.log('[Init] Applying blocking rules on startup:', normalizedBlocked);
+      await applyBlockedSites(normalizedBlocked);
+    }
+  }
   
   console.log('Service worker ready, currentSession:', currentSession ? 'active' : 'none');
 })();
@@ -477,20 +489,50 @@ function setupWebNavigationListeners() {
       return;
     }
     
-    // Check session first
+    // Check always-block list from storage (works independently of session)
+    const settings = await getSettings();
+    if (settings.alwaysBlock && settings.alwaysBlock.length > 0) {
+      const host = normalizeToHostname(details.url);
+      if (host) {
+        const normalizedBlocked = settings.alwaysBlock
+          .map(d => normalizeToHostname(d))
+          .filter(h => h);
+        
+        // Check if host matches any blocked domain (including subdomains)
+        const isBlocked = normalizedBlocked.some(b => 
+          host === b || host.endsWith("." + b)
+        );
+        
+        if (isBlocked) {
+          console.log('[WebNav] 🚫 Domain is blocked (always-block):', host);
+          // DNR should handle this at network level, but redirect as backup
+          try {
+            await chrome.tabs.update(details.tabId, {
+              url: chrome.runtime.getURL(`blocked.html?reason=always-blocked&url=${encodeURIComponent(details.url)}`)
+            });
+            console.log('[WebNav] ✅ Redirect successful (backup)');
+          } catch (err) {
+            console.error('[WebNav] ❌ Redirect failed:', err);
+          }
+          return;
+        }
+      }
+    }
+    
+    // For session-based element-level blocking, check session state
     if (!currentSession?.active) {
-      console.log('[WebNav] No active session, skipping');
+      console.log('[WebNav] No active session, skipping element-level analysis');
       return;
     }
     
-    // Check if domain should be blocked
+    // Session-based blocking continues for element-level analysis
     const shouldBlock = await shouldBlockDomain(details.url);
     console.log('[WebNav] shouldBlockDomain check:', details.url, '->', shouldBlock);
     
     if (shouldBlock) {
       const urlObj = new URL(details.url);
       const domain = normalizeDomain(urlObj.hostname);
-      console.log('[WebNav] 🚫 BLOCKING domain (onBeforeNavigate):', domain, 'URL:', details.url);
+      console.log('[WebNav] 🚫 BLOCKING domain (session-based):', domain, 'URL:', details.url);
       
       // Redirect IMMEDIATELY - this happens before page loads
       try {
@@ -499,24 +541,7 @@ function setupWebNavigationListeners() {
         });
         console.log('[WebNav] ✅ Redirect successful');
       } catch (err) {
-        console.error('[WebNav] ❌ Redirect failed, trying script injection:', err);
-        // Fallback: inject blocking script
-        try {
-          await chrome.scripting.executeScript({
-            target: { tabId: details.tabId },
-            func: (blockedUrl) => {
-              if (window.location.href !== blockedUrl) {
-                window.stop(); // Stop page loading
-                document.documentElement.innerHTML = '';
-                document.documentElement.innerHTML = '<html><head><title>Blocked</title></head><body style="font-family: Arial; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; min-height: 100vh; display: flex; align-items: center; justify-content: center;"><div><h1>🚫 Page Blocked</h1><p>This domain is on your always-block list.</p><button onclick="window.history.back()" style="padding: 12px 24px; background: white; color: #667eea; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; margin-top: 20px;">Go Back</button></div></body></html>';
-                document.documentElement.scrollTop = 0;
-              }
-            },
-            args: [chrome.runtime.getURL(`blocked.html?reason=always-blocked&url=${encodeURIComponent(details.url)}`)]
-          });
-        } catch (scriptErr) {
-          console.error('[WebNav] ❌ Script injection also failed:', scriptErr);
-        }
+        console.error('[WebNav] ❌ Redirect failed:', err);
       }
       return;
     }
