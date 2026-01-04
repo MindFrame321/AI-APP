@@ -8,13 +8,13 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   width: 400px;
   min-height: 500px;
-  background: #ffffff;
+  background: linear-gradient(135deg, #f8f7ff 0%, #f3f7ff 50%, #fdf6ff 100%);
   color: #1a1a1a;
 }
 
 .container {
   padding: 0;
-  background: white;
+  background: transparent;
 }
 
 /* Header */
@@ -157,6 +157,10 @@ header h1 {
 
 .form-section {
   margin-bottom: 24px;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.04);
+  padding: 16px 16px 4px 16px;
 }
 
 .form-group {

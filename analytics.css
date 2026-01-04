@@ -11,6 +11,41 @@ body {
   color: #1a1a1a;
 }
 
+.layout-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.panel {
+  background: white;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.06);
+  padding: 16px;
+}
+
+.panel h3 {
+  margin: 0 0 6px 0;
+  font-size: 16px;
+}
+
+.panel p {
+  margin: 0 0 8px 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.feed-item {
+  border-bottom: 1px solid #f1f5f9;
+  padding: 8px 0;
+}
+
+.feed-item:last-child {
+  border-bottom: none;
+}
+
 .container {
   max-width: 1200px;
   margin: 0 auto;
@@ -207,4 +242,3 @@ header h1 {
 .btn-secondary:hover {
   background: #cbd5e1;
 }
-

@@ -36,6 +36,7 @@ let lastApiCallTime = 0;
 const MIN_API_CALL_INTERVAL = 2000; // Minimum 2 seconds between API calls
 const MAX_QUEUE_SIZE = 10;
 const pauseTimers = new Map();
+let lastPrune = 0;
 
 // Current supported model
 const CURRENT_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent';
@@ -238,7 +239,7 @@ async function loadSessionState() {
 }
 
 // Start focus session
-async function startSession(taskDescription, durationMinutes, subgoals = [], energyTag = null) {
+async function startSession(taskDescription, durationMinutes, subgoals = [], energyTag = null, contractText = '') {
   sessionMetrics = { tabSwitches: 0, blockedAttempts: 0, idleSeconds: 0 };
   lastActivityTs = Date.now();
 
@@ -276,8 +277,11 @@ async function startSession(taskDescription, durationMinutes, subgoals = [], ene
     active: true,
     subgoals,
     metrics: sessionMetrics,
-    energyTag
+    energyTag,
+    contractText
   };
+  
+  await pruneOldData();
   
   console.log('[startSession] Creating session:', currentSession);
   await chrome.storage.local.set({ session: currentSession });
@@ -316,6 +320,12 @@ async function startSession(taskDescription, durationMinutes, subgoals = [], ene
   
   // Track analytics
   await trackSessionStart(taskDescription, durationMinutes);
+  // Track contract start in learning feed
+  if (contractText) {
+    const feed = (await chrome.storage.local.get(['learningFeed'])).learningFeed || [];
+    feed.push({ type: 'contract', text: contractText, ts: Date.now(), goal: taskDescription });
+    await chrome.storage.local.set({ learningFeed: feed.slice(-300) });
+  }
   
   // Notify all tabs to start blocking
   const tabs = await chrome.tabs.query({});
@@ -2479,6 +2489,12 @@ async function recordBrowsingHistory(pageContent) {
   learningData.browsingHistory.push(entry);
   learningData.browsingHistory = learningData.browsingHistory.slice(-10);
   await chrome.storage.local.set({ learningData });
+
+  // Learning feed
+  const stored = await chrome.storage.local.get(['learningFeed']);
+  const feed = stored.learningFeed || [];
+  feed.push({ type: 'page', title: entry.title, url: entry.url, ts: entry.ts });
+  await chrome.storage.local.set({ learningFeed: feed.slice(-300) });
 }
 
 // Get smart search query based on learning data
@@ -2824,6 +2840,54 @@ async function generateQuizQuestion(tabId) {
   };
 }
 
+async function maybeTriggerPassiveCoach(tabId, url) {
+  const settings = await getSettings();
+  if (!settings.passiveCoachEnabled) return;
+  const smoothness = computeFocusSmoothness(sessionMetrics);
+  const threshold = typeof settings.passiveCoachThreshold === 'number' ? settings.passiveCoachThreshold : 40;
+  if (smoothness >= threshold) return;
+  if (currentSession?.passiveCoachShown) return;
+  currentSession.passiveCoachShown = true;
+  await chrome.storage.local.set({ session: currentSession });
+
+  let summary = 'Stay on target for your goal.';
+  let quiz = { question: 'What are you focusing on?', answer: currentSession?.taskDescription || '' };
+
+  if (settings.aiFeaturesEnabled && settings.apiKey) {
+    try {
+      const content = await extractPageContent(tabId);
+      const prompt = `Summarize this page in 2 sentences and provide one short quiz question relevant to "${currentSession.taskDescription}". Format: Summary: ... Quiz: ... Answer: ...`;
+      const resp = await makeRateLimitedApiCall(() =>
+        fetch((settings.apiUrl || CURRENT_MODEL_URL) + `?key=${settings.apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: `${prompt}\n\n${content?.text?.slice(0, 1200) || ''}` }] }],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 200 }
+          })
+        })
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const sumMatch = text.match(/Summary:\s*(.*)/i);
+        const quizMatch = text.match(/Quiz:\s*(.*)/i);
+        const ansMatch = text.match(/Answer:\s*(.*)/i);
+        summary = sumMatch ? sumMatch[1].trim() : text.slice(0, 200);
+        quiz = { question: quizMatch ? quizMatch[1].trim() : quiz.question, answer: ansMatch ? ansMatch[1].trim() : quiz.answer };
+      }
+    } catch (e) {
+      console.warn('[PassiveCoach] fallback summary:', e);
+    }
+  }
+
+  chrome.tabs.sendMessage(tabId, {
+    action: 'showPassiveCoach',
+    summary,
+    quiz
+  }).catch(() => {});
+}
+
 // Goal decomposition helper
 async function decomposeGoal(goal) {
   const settings = await getSettings();
@@ -2891,6 +2955,21 @@ function simpleSubgoals(goal) {
     `Summarize key points of ${goal}`
   ];
   return base.slice(0, 5).map(t => ({ text: t, done: false }));
+}
+
+// Data retention
+async function pruneOldData() {
+  const settings = await getSettings();
+  if (!settings.dataRetentionEnabled) return;
+  const now = Date.now();
+  if (now - lastPrune < 6 * 60 * 60 * 1000) return; // prune every 6h max
+  lastPrune = now;
+  const days = settings.dataRetentionDays || 90;
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  const result = await chrome.storage.local.get(['sessions', 'learningFeed']);
+  const sessions = (result.sessions || []).filter(s => (s.endTime || s.startTime || 0) >= cutoff);
+  const feed = (result.learningFeed || []).filter(i => (i.ts || 0) >= cutoff);
+  await chrome.storage.local.set({ sessions, learningFeed: feed });
 }
 
 // Chatbot handler
@@ -3184,6 +3263,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'saveReflection') {
+    try {
+      const { text } = request;
+      if (currentSession) {
+        currentSession.reflection = text;
+        await chrome.storage.local.set({ session: currentSession });
+      }
+      const stored = await chrome.storage.local.get(['learningFeed']);
+      const feed = stored.learningFeed || [];
+      feed.push({ type: 'reflection', text, ts: Date.now(), goal: currentSession?.taskDescription });
+      await chrome.storage.local.set({ learningFeed: feed.slice(-300) });
+      sendResponse({ success: true });
+    } catch (e) {
+      sendResponse({ success: false, error: e.message });
+    }
+    return true;
+  }
+
   if (request.action === 'testBlock') {
     // Test action to force block current tab
     if (sender.tab?.id) {
@@ -3288,7 +3385,7 @@ async function trackSessionStart(taskDescription, durationMinutes) {
 }
 
 async function trackSessionEnd(session) {
-  const result = await chrome.storage.local.get(['analytics', 'sessions']);
+  const result = await chrome.storage.local.get(['analytics', 'sessions', 'learningFeed']);
   const analytics = result.analytics || {
     totalFocusTime: 0,
     distractionsBlocked: 0,
@@ -3299,12 +3396,15 @@ async function trackSessionEnd(session) {
   };
   
   const sessions = result.sessions || [];
+  const learningFeed = result.learningFeed || [];
   
   // Add completed session
+  const smoothness = computeFocusSmoothness(session.metrics || {});
   sessions.push({
     ...session,
     completed: true,
-    actualDuration: Math.floor((Date.now() - session.startTime) / 60000)
+    actualDuration: Math.floor((Date.now() - session.startTime) / 60000),
+    smoothness
   });
   
   // Update analytics
@@ -3325,11 +3425,34 @@ async function trackSessionEnd(session) {
   // Update daily focus
   const dateKey = new Date().toISOString().split('T')[0];
   analytics.dailyFocus[dateKey] = (analytics.dailyFocus[dateKey] || 0) + session.durationMinutes;
+
+  // Learning feed entry
+  learningFeed.push({
+    type: 'session',
+    goal: session.taskDescription,
+    startTime: session.startTime,
+    endTime: session.endTime,
+    smoothness,
+    energyTag: session.energyTag || null,
+    contract: session.contractText || ''
+  });
   
   await chrome.storage.local.set({ 
     analytics,
-    sessions: sessions.slice(-100) // Keep last 100 sessions
+    sessions: sessions.slice(-100), // Keep last 100 sessions
+    learningFeed: learningFeed.slice(-300)
   });
+}
+
+function computeFocusSmoothness(metrics) {
+  // Focus Smoothness formula (0-100):
+  // Start at 100, subtract 5 per tab switch, subtract 10 per blocked attempt,
+  // subtract idleSeconds / 30. Floor at 0.
+  const switches = metrics.tabSwitches || 0;
+  const blocked = metrics.blockedAttempts || 0;
+  const idle = metrics.idleSeconds || 0;
+  const raw = 100 - (switches * 5) - (blocked * 10) - Math.floor(idle / 30);
+  return Math.max(0, Math.min(100, raw));
 }
 
 function isConsecutiveDay(date1, date2) {

@@ -69,15 +69,33 @@
       </div>
     </div>
 
-    <div class="charts-section">
-      <div class="chart-card">
-        <h2>Focus Time Over Time</h2>
-        <canvas id="focusTimeChart"></canvas>
+    <div class="charts-section layout-grid">
+      <div>
+        <div class="chart-card">
+          <h2>Focus Time Over Time</h2>
+          <canvas id="focusTimeChart"></canvas>
+        </div>
+        <div class="session-history panel">
+          <h3>Reflection Feed</h3>
+          <p>Quick notes captured at the end of sessions.</p>
+          <div id="reflectionFeed"></div>
+        </div>
       </div>
-
-      <div class="chart-card">
-        <h2>Most Blocked Websites</h2>
-        <canvas id="blockedSitesChart"></canvas>
+      <div>
+        <div class="chart-card">
+          <h2>Most Blocked Websites</h2>
+          <canvas id="blockedSitesChart"></canvas>
+        </div>
+        <div class="panel">
+          <h3>Learning Feed</h3>
+          <p>Timeline of goals, pages, and key notes.</p>
+          <div id="learningFeed"></div>
+        </div>
+        <div class="panel">
+          <h3>Narrative Insights</h3>
+          <p>Plain-English patterns based on your sessions.</p>
+          <ul id="insightsList"></ul>
+        </div>
       </div>
     </div>
 
@@ -95,4 +113,3 @@
   <script src="analytics.js"></script>
 </body>
 </html>
-

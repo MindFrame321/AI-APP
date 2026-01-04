@@ -270,6 +270,32 @@
             value="30"
           >
         </div>
+
+        <div class="form-group">
+          <label for="energySelect">
+            <span class="label-icon">⚡</span>
+            Energy Level
+          </label>
+          <select id="energySelect">
+            <option value="">Select...</option>
+            <option value="High">High</option>
+            <option value="Low">Low</option>
+            <option value="Exhausted">Exhausted</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="contractInput">
+            <span class="label-icon">✍️</span>
+            Personal Contract (optional)
+          </label>
+          <textarea 
+            id="contractInput" 
+            placeholder="I commit to..."
+            rows="2"
+          ></textarea>
+          <p class="input-hint">Private promise you track yourself.</p>
+        </div>
       </div>
 
       <button id="startSessionBtn" class="btn btn-primary">

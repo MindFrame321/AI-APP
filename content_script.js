@@ -181,6 +181,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === 'pauseTax') {
     showPauseTaxOverlay(request.goal, request.delayMs, request.elapsed);
     sendResponse({ success: true });
+  } else if (request.action === 'showPassiveCoach') {
+    showPassiveCoachOverlay(request.summary, request.quiz);
+    sendResponse({ success: true });
   }
   return true;
 });
@@ -587,6 +590,44 @@ function showPauseTaxOverlay(goal, delayMs = 5000, elapsedMinutes = 0) {
     overlay.style.display = 'none';
     chrome.runtime.sendMessage({ action: 'pauseTaxDecision', choice: 'break' }).catch(() => {});
   };
+}
+
+function showPassiveCoachOverlay(summary, quiz) {
+  if (!document.body) return;
+  let wrap = document.getElementById('focufy-passive-coach');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'focufy-passive-coach';
+    wrap.style.cssText = `
+      position: fixed; bottom: 16px; right: 16px; z-index: 9999998;
+      max-width: 360px; background: #0f172a; color: #e2e8f0;
+      border-radius: 14px; border: 1px solid rgba(255,255,255,0.14);
+      box-shadow: 0 24px 80px rgba(0,0,0,0.35);
+      padding: 14px; font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    `;
+    wrap.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <div style="font-weight:700;">Focus Coach</div>
+        <button id="coachClose" style="background:transparent; color:#e2e8f0; border:1px solid rgba(255,255,255,0.2); border-radius:8px; width:28px; height:28px; cursor:pointer;">×</button>
+      </div>
+      <div id="coachSummary" style="font-size:13px; color:#cbd5e1; margin-bottom:10px;"></div>
+      <div id="coachQuiz" style="font-size:13px; color:#e2e8f0;"></div>
+      <div style="margin-top:10px; display:flex; gap:8px;">
+        <button id="coachOk" class="focufy-btn primary" style="flex:1; background:linear-gradient(135deg,#667eea,#5a67d8); color:white; border:none; border-radius:10px; padding:8px 10px; cursor:pointer;">Got it</button>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+  }
+  const summaryEl = document.getElementById('coachSummary');
+  const quizEl = document.getElementById('coachQuiz');
+  if (summaryEl) summaryEl.textContent = summary || 'Stay focused.';
+  if (quizEl) {
+    quizEl.innerHTML = quiz && quiz.question ? `<strong>Quiz:</strong> ${quiz.question}` : '';
+  }
+  const closeBtn = document.getElementById('coachClose');
+  const okBtn = document.getElementById('coachOk');
+  if (closeBtn) closeBtn.onclick = () => wrap.remove();
+  if (okBtn) okBtn.onclick = () => wrap.remove();
 }
 
 

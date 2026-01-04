@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function loadAnalytics() {
   try {
-    const result = await chrome.storage.local.get(['analytics', 'sessions']);
+    const result = await chrome.storage.local.get(['analytics', 'sessions', 'learningFeed']);
     const analytics = result.analytics || {
       totalFocusTime: 0,
       distractionsBlocked: 0,
@@ -23,11 +23,15 @@ async function loadAnalytics() {
     };
     
     const sessions = result.sessions || [];
+    const learningFeed = result.learningFeed || [];
     
     // Update stats
     updateStats(analytics, sessions);
     updateCharts(analytics, sessions);
     updateSessionList(sessions);
+    renderLearningFeed(learningFeed);
+    renderReflectionFeed(sessions);
+    renderInsights(sessions, analytics);
   } catch (error) {
     console.error('Error loading analytics:', error);
   }
@@ -194,10 +198,11 @@ function setupEventListeners() {
 
 async function exportData() {
   try {
-    const result = await chrome.storage.local.get(['analytics', 'sessions']);
+    const result = await chrome.storage.local.get(['analytics', 'sessions', 'learningFeed']);
     const data = {
       analytics: result.analytics,
       sessions: result.sessions,
+      learningFeed: result.learningFeed,
       exportDate: new Date().toISOString()
     };
     
@@ -216,15 +221,91 @@ async function exportData() {
 }
 
 function convertToCSV(sessions) {
-  const headers = ['Date', 'Task', 'Duration (minutes)', 'Start Time', 'End Time'];
+  const headers = ['Date', 'Task', 'Duration (minutes)', 'Start Time', 'End Time', 'Energy', 'Smoothness', 'Tab Switches', 'Blocked Attempts', 'Idle Seconds'];
   const rows = sessions.map(s => [
     new Date(s.startTime).toLocaleDateString(),
-    s.taskDescription,
+    `"${(s.taskDescription || '').replace(/"/g, '""')}"`,
     s.durationMinutes || 0,
     new Date(s.startTime).toISOString(),
-    new Date(s.endTime || s.startTime).toISOString()
+    s.endTime ? new Date(s.endTime).toISOString() : '',
+    s.energyTag || '',
+    s.smoothness ?? '',
+    s.metrics?.tabSwitches ?? '',
+    s.metrics?.blockedAttempts ?? '',
+    s.metrics?.idleSeconds ?? ''
   ]);
   
-  return [headers, ...rows].map(row => row.join(',')).join('\n');
+  return [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
 }
 
+function renderLearningFeed(feed) {
+  const list = document.getElementById('learningFeed');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!feed || feed.length === 0) {
+    list.innerHTML = '<p class="help-text">No activity yet.</p>';
+    return;
+  }
+  feed.slice(-30).reverse().forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'feed-item';
+    const ts = item.ts ? new Date(item.ts).toLocaleString() : '';
+    if (item.type === 'page') {
+      div.innerHTML = `<strong>Page:</strong> ${item.title || item.url || ''}<div style="font-size:12px;color:#6b7280;">${ts}</div>`;
+    } else if (item.type === 'session') {
+      div.innerHTML = `<strong>Session:</strong> ${item.goal || ''} <span style="color:#64748b;">(smoothness ${item.smoothness ?? '--'})</span><div style="font-size:12px;color:#6b7280;">${ts}</div>`;
+    } else if (item.type === 'reflection') {
+      div.innerHTML = `<strong>Reflection:</strong> ${item.text || ''}<div style="font-size:12px;color:#6b7280;">${ts}</div>`;
+    } else if (item.type === 'contract') {
+      div.innerHTML = `<strong>Contract:</strong> ${item.text || ''}<div style="font-size:12px;color:#6b7280;">${ts}</div>`;
+    } else {
+      div.textContent = JSON.stringify(item);
+    }
+    list.appendChild(div);
+  });
+}
+
+function renderReflectionFeed(sessions) {
+  const list = document.getElementById('reflectionFeed');
+  if (!list) return;
+  list.innerHTML = '';
+  const withReflections = sessions.filter(s => s.reflection);
+  if (withReflections.length === 0) {
+    list.innerHTML = '<p class="help-text">Reflections will appear here after sessions.</p>';
+    return;
+  }
+  withReflections.slice(-10).reverse().forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'feed-item';
+    div.innerHTML = `<div style="font-weight:600;">"${s.taskDescription || ''}"</div><div style="font-size:13px;color:#334155;margin:4px 0;">${s.reflection}</div><div style="font-size:12px;color:#6b7280;">${new Date(s.endTime || s.startTime).toLocaleString()}</div>`;
+    list.appendChild(div);
+  });
+}
+
+function renderInsights(sessions, analytics) {
+  const list = document.getElementById('insightsList');
+  if (!list) return;
+  list.innerHTML = '';
+  const insights = [];
+  if (sessions.length > 2) {
+    const mornings = sessions.filter(s => new Date(s.startTime).getHours() < 12).length;
+    const evens = sessions.filter(s => new Date(s.startTime).getHours() >= 17).length;
+    insights.push(`You start ${mornings >= evens ? 'more' : 'fewer'} sessions in the morning than evening. Try scheduling focus when you’re freshest.`);
+  }
+  const lowSmooth = sessions.filter(s => (s.smoothness ?? 100) < 50).length;
+  if (lowSmooth > 0) {
+    insights.push(`Some sessions had low smoothness (<50). Consider reducing tab switches or blocked attempts.`);
+  }
+  if ((analytics.totalFocusTime || 0) > 0) {
+    const hours = Math.round((analytics.totalFocusTime / 60) * 10) / 10;
+    insights.push(`Total focus logged: ${hours}h. Keep the streak going!`);
+  }
+  if (insights.length === 0) {
+    insights.push('Not enough data yet. Complete a few sessions to see insights.');
+  }
+  insights.forEach(t => {
+    const li = document.createElement('li');
+    li.textContent = t;
+    list.appendChild(li);
+  });
+}

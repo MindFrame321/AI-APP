@@ -164,6 +164,69 @@ header h1 {
   line-height: 1.4;
 }
 
+.rule-editor {
+  margin-top: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.rule-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.rule-title {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.rule-subtitle {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.rules-list .rule-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: white;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  align-items: center;
+}
+
+/* General polish */
+.settings-section {
+  background: white;
+  border-radius: 14px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.05);
+  padding: 16px;
+}
+
+body {
+  background: linear-gradient(135deg, #f8f7ff 0%, #f3f7ff 50%, #fdf6ff 100%);
+}
+
+.rule-controls select,
+.rule-controls input {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+}
+
+.btn.btn-small {
+  width: auto;
+  padding: 8px 12px;
+}
+
 .list-container {
   margin-top: 16px;
 }

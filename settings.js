@@ -119,6 +119,7 @@ async function loadSettings() {
     
     renderDomainList('alwaysAllowList', currentSettings.alwaysAllow || []);
     renderDomainList('alwaysBlockList', currentSettings.alwaysBlock || []);
+    renderRules(currentSettings.contextualRules || []);
   } catch (error) {
     console.error('Error loading settings:', error);
     showStatus('Error loading settings', 'error');
@@ -238,6 +239,7 @@ async function saveSettings() {
     currentSettings.dataRetentionEnabled = document.getElementById('dataRetentionEnabled').checked;
     const retentionInput = document.getElementById('dataRetentionDays');
     currentSettings.dataRetentionDays = retentionInput ? parseInt(retentionInput.value || '90', 10) || 90 : 90;
+    currentSettings.contextualRules = readRulesFromUI();
     
     await writeSettingsRaw(currentSettings);
     
@@ -293,7 +295,8 @@ async function resetSettings() {
     learningFeedEnabled: false,
     energyModeEnabled: false,
     dataRetentionEnabled: false,
-    dataRetentionDays: 90
+    dataRetentionDays: 90,
+    contextualRules: []
   };
   
   await writeSettingsRaw(currentSettings);
@@ -310,6 +313,7 @@ function setupEventListeners() {
   const addAlwaysBlockBtn = document.getElementById('addAlwaysBlockBtn');
   const alwaysAllowInput = document.getElementById('alwaysAllowInput');
   const alwaysBlockInput = document.getElementById('alwaysBlockInput');
+  const addRuleBtn = document.getElementById('addRuleBtn');
   
   if (!saveBtn || !resetBtn || !addAlwaysAllowBtn || !addAlwaysBlockBtn) {
     console.error('Settings: Missing required buttons', {
@@ -327,6 +331,7 @@ function setupEventListeners() {
   resetBtn.addEventListener('click', resetSettings);
   if (exportBtn) exportBtn.addEventListener('click', exportData);
   if (clearBtn) clearBtn.addEventListener('click', clearData);
+  if (addRuleBtn) addRuleBtn.addEventListener('click', () => addRule());
   
   addAlwaysAllowBtn.addEventListener('click', () => {
     console.log('Add Always Allow button clicked');
@@ -410,12 +415,92 @@ async function exportData() {
 async function clearData() {
   if (!confirm('Clear analytics, sessions, and learning data? Settings will stay.')) return;
   try {
-    await chrome.storage.local.remove(['analytics','sessions','learningData','session','pageAnalysisCache']);
+    await chrome.storage.local.remove(['analytics','sessions','learningData','session','pageAnalysisCache','learningFeed']);
     showStatus('Data cleared', 'success');
   } catch (e) {
     console.error('Clear data error', e);
     showStatus('Failed to clear data', 'error');
   }
+}
+
+// Contextual rules UI
+function renderRules(rules) {
+  const list = document.getElementById('rulesList');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!rules || rules.length === 0) {
+    list.innerHTML = '<p class="help-text">No rules yet. Click "Add Rule" to create one.</p>';
+    return;
+  }
+  rules.forEach((rule, idx) => {
+    const item = document.createElement('div');
+    item.className = 'rule-item';
+    item.innerHTML = `
+      <div class="rule-controls">
+        <label class="input-label">Type</label>
+        <select data-field="type">
+          <option value="allowIfDomainMatchesGoalKeywords">Allow if domain matches goal keywords</option>
+          <option value="allowIfYoutubeVideoUnderMinutes">Allow YouTube video under minutes</option>
+          <option value="allowOnlySubredditListDuringSession">Allow only subreddits</option>
+          <option value="blockAfterMinutesIntoSession">Block after minutes into session</option>
+        </select>
+      </div>
+      <div class="rule-controls" data-extra="limitMinutes">
+        <label class="input-label">Minutes</label>
+        <input type="number" min="1" max="240" placeholder="e.g., 10">
+      </div>
+      <div class="rule-controls" data-extra="subreddits">
+        <label class="input-label">Subreddits (comma)</label>
+        <input type="text" placeholder="e.g., productivity, learnprogramming">
+      </div>
+      <div class="rule-controls">
+        <label class="input-label">Disabled</label>
+        <select data-field="disabled">
+          <option value="false">No</option>
+          <option value="true">Yes</option>
+        </select>
+      </div>
+      <button class="btn btn-small" data-action="remove">Remove</button>
+    `;
+    const typeSel = item.querySelector('select[data-field="type"]');
+    const disabledSel = item.querySelector('select[data-field="disabled"]');
+    const limitInput = item.querySelector('[data-extra="limitMinutes"] input');
+    const subInput = item.querySelector('[data-extra="subreddits"] input');
+    typeSel.value = rule.type || 'allowIfDomainMatchesGoalKeywords';
+    disabledSel.value = rule.disabled ? 'true' : 'false';
+    if (rule.limitMinutes && limitInput) limitInput.value = rule.limitMinutes;
+    if (rule.subreddits && subInput) subInput.value = (rule.subreddits || []).join(', ');
+    item.querySelector('[data-action="remove"]').addEventListener('click', () => {
+      const newRules = (currentSettings.contextualRules || []).filter((_, i) => i !== idx);
+      currentSettings.contextualRules = newRules;
+      renderRules(newRules);
+    });
+    list.appendChild(item);
+  });
+}
+
+function addRule() {
+  if (!currentSettings.contextualRules) currentSettings.contextualRules = [];
+  currentSettings.contextualRules.push({ type: 'allowIfDomainMatchesGoalKeywords', disabled: false });
+  renderRules(currentSettings.contextualRules);
+}
+
+function readRulesFromUI() {
+  const list = document.getElementById('rulesList');
+  if (!list) return currentSettings.contextualRules || [];
+  const items = Array.from(list.querySelectorAll('.rule-item'));
+  return items.map(item => {
+    const type = item.querySelector('select[data-field="type"]').value;
+    const disabled = item.querySelector('select[data-field="disabled"]').value === 'true';
+    const limitVal = item.querySelector('[data-extra="limitMinutes"] input')?.value;
+    const subVal = item.querySelector('[data-extra="subreddits"] input')?.value || '';
+    return {
+      type,
+      disabled,
+      limitMinutes: limitVal ? parseInt(limitVal, 10) : undefined,
+      subreddits: subVal ? subVal.split(',').map(s => s.trim()).filter(Boolean) : []
+    };
+  });
 }
 
 // Check user API key status from backend

@@ -657,6 +657,8 @@ async function startSession() {
   const taskInput = document.getElementById('taskInput');
   const durationSelect = document.getElementById('durationSelect');
   const customDuration = document.getElementById('customDuration');
+  const energySelect = document.getElementById('energySelect');
+  const contractInput = document.getElementById('contractInput');
   
   const taskDescription = taskInput.value.trim();
   console.log('Task description:', taskDescription);
@@ -678,6 +680,8 @@ async function startSession() {
   }
   
   console.log('Duration:', durationMinutes, 'minutes');
+  const energyTag = energySelect ? energySelect.value || null : null;
+  const contractText = contractInput ? contractInput.value.trim() : '';
   
   try {
     console.log('Sending startSession message to background...');
@@ -686,7 +690,8 @@ async function startSession() {
       taskDescription,
       durationMinutes,
       subgoals,
-      energyTag: null
+      energyTag,
+      contractText
     });
     
     console.log('Start session response:', response);
@@ -793,6 +798,7 @@ async function confirmEndSession() {
     
     if (response && response.success) {
       showStatus('Focus session ended', 'success');
+      await maybeCaptureReflection();
       if (updateInterval) {
         clearInterval(updateInterval);
         updateInterval = null;
@@ -891,6 +897,26 @@ async function savePassword() {
   
   // Now end the session
   await confirmEndSession();
+}
+
+async function maybeCaptureReflection() {
+  try {
+    const settings = await chrome.storage.local.get(['settings']);
+    const cfg = settings.settings || {};
+    if (!cfg.sessionReflectionEnabled) return;
+    const prompts = cfg.reflectionPrompts || [
+      'What helped you stay focused this session?',
+      'What will you change next time?',
+      'Key takeaway from this session?'
+    ];
+    const prompt = prompts[Math.floor(Math.random() * prompts.length)];
+    const answer = window.prompt(prompt, '');
+    if (answer && answer.trim()) {
+      await chrome.runtime.sendMessage({ action: 'saveReflection', text: answer.trim() });
+    }
+  } catch (e) {
+    console.warn('Reflection capture failed:', e);
+  }
 }
 
 function showStatus(message, type) {
