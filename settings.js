@@ -204,17 +204,42 @@ async function resetSettings() {
 }
 
 function setupEventListeners() {
-  document.getElementById('saveBtn').addEventListener('click', saveSettings);
-  document.getElementById('resetBtn').addEventListener('click', resetSettings);
+  const saveBtn = document.getElementById('saveBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const addAlwaysAllowBtn = document.getElementById('addAlwaysAllowBtn');
+  const addAlwaysBlockBtn = document.getElementById('addAlwaysBlockBtn');
+  const alwaysAllowInput = document.getElementById('alwaysAllowInput');
+  const alwaysBlockInput = document.getElementById('alwaysBlockInput');
   
-  document.getElementById('addAlwaysAllowBtn').addEventListener('click', () => {
-    const input = document.getElementById('alwaysAllowInput');
-    addDomain('alwaysAllow', input.value);
+  if (!saveBtn || !resetBtn || !addAlwaysAllowBtn || !addAlwaysBlockBtn) {
+    console.error('Settings: Missing required buttons', {
+      saveBtn: !!saveBtn,
+      resetBtn: !!resetBtn,
+      addAlwaysAllowBtn: !!addAlwaysAllowBtn,
+      addAlwaysBlockBtn: !!addAlwaysBlockBtn
+    });
+    return;
+  }
+  
+  saveBtn.addEventListener('click', saveSettings);
+  resetBtn.addEventListener('click', resetSettings);
+  
+  addAlwaysAllowBtn.addEventListener('click', () => {
+    console.log('Add Always Allow button clicked');
+    if (alwaysAllowInput) {
+      addDomain('alwaysAllow', alwaysAllowInput.value);
+    } else {
+      console.error('alwaysAllowInput not found');
+    }
   });
   
-  document.getElementById('addAlwaysBlockBtn').addEventListener('click', () => {
-    const input = document.getElementById('alwaysBlockInput');
-    addDomain('alwaysBlock', input.value);
+  addAlwaysBlockBtn.addEventListener('click', () => {
+    console.log('Add Always Block button clicked');
+    if (alwaysBlockInput) {
+      addDomain('alwaysBlock', alwaysBlockInput.value);
+    } else {
+      console.error('alwaysBlockInput not found');
+    }
   });
   
   document.getElementById('alwaysAllowInput').addEventListener('keypress', (e) => {
