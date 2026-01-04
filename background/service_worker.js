@@ -230,6 +230,79 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // Start monitoring
 function startSessionMonitoring() {
+  // Use webNavigation API to catch ALL navigation events (including SPA navigation like YouTube)
+  chrome.webNavigation.onCommitted.addListener(async (details) => {
+    // Only process main frame navigation (not iframes)
+    if (details.frameId !== 0) return;
+    
+    // Skip chrome:// and extension:// URLs
+    if (details.url.startsWith('chrome://') || 
+        details.url.startsWith('chrome-extension://') ||
+        details.url.startsWith('moz-extension://')) {
+      return;
+    }
+    
+    // Skip extension pages
+    if (details.url.includes('settings.html') ||
+        details.url.includes('blocked.html') ||
+        details.url.includes('analytics.html') ||
+        details.url.includes('help.html')) {
+      return;
+    }
+    
+    if (!currentSession?.active) {
+      return;
+    }
+    
+    // Check always-block FIRST using webNavigation (before page loads)
+    const settings = await getSettings();
+    const urlObj = new URL(details.url);
+    let domain = urlObj.hostname.toLowerCase().replace(/^www\./, '');
+    
+    const normalizeDomain = (d) => {
+      if (!d) return '';
+      let normalized = d.toLowerCase().trim();
+      normalized = normalized.replace(/^https?:\/\//, '');
+      normalized = normalized.split('/')[0].split('?')[0].split('#')[0];
+      normalized = normalized.replace(/^www\./, '');
+      normalized = normalized.replace(/\.$/, '');
+      return normalized;
+    };
+    
+    const normalizedDomain = normalizeDomain(domain);
+    const normalizedAlwaysBlock = (settings.alwaysBlock || []).map(normalizeDomain).filter(d => d);
+    
+    if (normalizedAlwaysBlock.includes(normalizedDomain)) {
+      // Redirect to blocked page IMMEDIATELY
+      console.log('[WebNav] 🚫 Blocking domain via redirect:', normalizedDomain);
+      chrome.tabs.update(details.tabId, {
+        url: chrome.runtime.getURL(`blocked.html?reason=always-blocked&url=${encodeURIComponent(details.url)}`)
+      });
+      return; // Don't continue with analysis
+    }
+    
+    // For always-allow, just let it through without analysis
+    const normalizedAlwaysAllow = (settings.alwaysAllow || []).map(normalizeDomain).filter(d => d);
+    if (normalizedAlwaysAllow.includes(normalizedDomain)) {
+      console.log('[WebNav] ✅ Domain is always-allowed:', normalizedDomain);
+      return; // Don't analyze, just allow
+    }
+    
+    // For other domains, analyze after page loads
+    // Use a small delay to ensure page is ready
+    setTimeout(async () => {
+      try {
+        const tab = await chrome.tabs.get(details.tabId);
+        if (tab.url === details.url && currentSession?.active) {
+          await analyzeAndBlockPage(details.tabId, details.url);
+        }
+      } catch (err) {
+        console.error('[WebNav] Error analyzing page:', err);
+      }
+    }, 500);
+  });
+  
+  // Also keep tabs.onUpdated as backup for pages that load before webNavigation fires
   chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     if (changeInfo.status === 'complete' && tab.url && currentSession?.active) {
       // Skip chrome:// and extension:// URLs
@@ -237,7 +310,12 @@ function startSessionMonitoring() {
         return;
       }
       
-      // Analyze and block elements on this page
+      // Skip if already handled by webNavigation
+      if (tab.url.includes('blocked.html')) {
+        return;
+      }
+      
+      // Analyze and block elements on this page (for non-blocked domains)
       await analyzeAndBlockPage(tabId, tab.url);
     }
   });
@@ -270,34 +348,24 @@ async function analyzeAndBlockPage(tabId, url) {
     let domain = urlObj.hostname.toLowerCase().replace(/^www\./, ''); // Normalize: lowercase, remove www
     console.log('[Analyze] Analyzing page:', domain, 'Task:', currentSession.taskDescription);
     
-    // Check always-allow and always-block lists FIRST (before any other logic)
+    // Note: Always-block/allow is now handled in webNavigation.onCommitted
+    // This function only runs for domains that passed the webNavigation check
     const settings = await getSettings();
     console.log('[Analyze] Settings loaded, API Key present:', !!settings.apiKey);
-    console.log('[Analyze] Always Allow list (raw):', settings.alwaysAllow);
-    console.log('[Analyze] Always Block list (raw):', settings.alwaysBlock);
     
-    // Normalize domains in lists for comparison - handle all subdomains
+    // Double-check always-allow (safety net in case webNavigation missed it)
     const normalizeDomain = (d) => {
       if (!d) return '';
       let normalized = d.toLowerCase().trim();
-      // Remove protocol if present
       normalized = normalized.replace(/^https?:\/\//, '');
-      // Remove path, query, hash
       normalized = normalized.split('/')[0].split('?')[0].split('#')[0];
-      // Remove www. prefix
       normalized = normalized.replace(/^www\./, '');
-      // Remove any trailing dots
       normalized = normalized.replace(/\.$/, '');
       return normalized;
     };
     
     const normalizedDomain = normalizeDomain(domain);
     const normalizedAlwaysAllow = (settings.alwaysAllow || []).map(normalizeDomain).filter(d => d);
-    const normalizedAlwaysBlock = (settings.alwaysBlock || []).map(normalizeDomain).filter(d => d);
-    
-    console.log('[Analyze] Normalized domain:', normalizedDomain);
-    console.log('[Analyze] Normalized Always Allow list:', normalizedAlwaysAllow);
-    console.log('[Analyze] Normalized Always Block list:', normalizedAlwaysBlock);
     
     if (normalizedAlwaysAllow.includes(normalizedDomain)) {
       // Always allowed - don't block anything
@@ -306,28 +374,6 @@ async function analyzeAndBlockPage(tabId, url) {
         console.error('[Analyze] Error sending clearBlocks message:', err);
       });
       return;
-    }
-    
-    if (normalizedAlwaysBlock.includes(normalizedDomain)) {
-      // Block entire page - THIS MUST HAPPEN BEFORE ANY YOUTUBE-SPECIFIC CODE
-      console.log('[Analyze] 🚫 Domain is in always-block list, blocking entire page');
-      console.log('[Analyze] Sending blockPage message to tab:', tabId);
-      chrome.tabs.sendMessage(tabId, {
-        action: 'blockPage',
-        reason: 'always-blocked'
-      }).catch((err) => {
-        console.error('[Analyze] Error sending blockPage message:', err);
-        // If message fails, try injecting the block directly
-        chrome.scripting.executeScript({
-          target: { tabId: tabId },
-          func: () => {
-            window.location.href = chrome.runtime.getURL('blocked.html?reason=always-blocked');
-          }
-        }).catch((scriptErr) => {
-          console.error('[Analyze] Error executing redirect script:', scriptErr);
-        });
-      });
-      return; // CRITICAL: Return early to prevent any other blocking logic
     }
     
     // Check cache - more aggressive caching
