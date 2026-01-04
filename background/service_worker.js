@@ -2271,9 +2271,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   
   if (request.action === 'checkAlwaysBlock') {
-    shouldBlockDomain(request.url)
-      .then(shouldBlock => sendResponse({ shouldBlock }))
-      .catch(err => sendResponse({ shouldBlock: false }));
+    // Reload session first in case service worker restarted
+    (async () => {
+      if (!currentSession || !currentSession.active) {
+        await loadSessionState();
+      }
+      shouldBlockDomain(request.url)
+        .then(shouldBlock => sendResponse({ shouldBlock }))
+        .catch(err => sendResponse({ shouldBlock: false }));
+    })();
+    return true;
+  }
+  
+  if (request.action === 'debugSession') {
+    // Debug command to check session state
+    (async () => {
+      await loadSessionState();
+      const storage = await chrome.storage.local.get(['session']);
+      sendResponse({ 
+        currentSession,
+        sessionFromStorage: storage.session,
+        sessionActive: currentSession?.active
+      });
+    })();
     return true;
   }
   
