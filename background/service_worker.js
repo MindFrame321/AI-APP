@@ -160,7 +160,14 @@ async function startSession(taskDescription, durationMinutes) {
     active: true
   };
   
+  console.log('[startSession] Creating session:', currentSession);
   await chrome.storage.local.set({ session: currentSession });
+  console.log('[startSession] ✅ Session saved to storage');
+  
+  // Verify it was saved
+  const verify = await chrome.storage.local.get(['session']);
+  console.log('[startSession] Verification - session in storage:', verify.session);
+  
   chrome.alarms.create('sessionEnd', { when: endTime });
   startSessionMonitoring();
   
