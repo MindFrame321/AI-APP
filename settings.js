@@ -123,16 +123,24 @@ function addDomain(listType, domain) {
   }
   
   currentSettings[listType].push(domain);
+  console.log(`[addDomain] Added ${domain} to ${listType}, new list:`, currentSettings[listType]);
+  
   renderDomainList(
     listType === 'alwaysAllow' ? 'alwaysAllowList' : 'alwaysBlockList',
     currentSettings[listType]
   );
   
   const inputId = listType === 'alwaysAllow' ? 'alwaysAllowInput' : 'alwaysBlockInput';
-  document.getElementById(inputId).value = '';
+  const input = document.getElementById(inputId);
+  if (input) {
+    input.value = '';
+  }
   
-  // Auto-save settings
-  saveSettings();
+  // Auto-save settings and update blocking rules
+  await saveSettings();
+  
+  // Show success message
+  showStatus(`Added ${domain} to ${listType === 'alwaysAllow' ? 'Always Allow' : 'Always Block'}`, 'success');
 }
 
 function removeDomain(listType, domain) {
