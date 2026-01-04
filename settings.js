@@ -92,7 +92,7 @@ function renderDomainList(listId, domains) {
   });
 }
 
-function addDomain(listType, domain) {
+async function addDomain(listType, domain) {
   domain = domain.trim();
   
   if (!domain) {
