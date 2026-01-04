@@ -97,6 +97,18 @@ async function migrateSettings() {
         needsUpdate = true;
         console.log('Updating API key to new key');
       }
+
+      // Add defaults for new navigation/learning toggles
+      if (typeof settings.autoNavigateEnabled === 'undefined') {
+        settings.autoNavigateEnabled = true;
+        needsUpdate = true;
+        console.log('Enabling auto-navigation by default');
+      }
+      if (typeof settings.learningModeEnabled === 'undefined') {
+        settings.learningModeEnabled = true;
+        needsUpdate = true;
+        console.log('Enabling learning mode by default');
+      }
       
       if (needsUpdate) {
         await chrome.storage.local.set({ settings });
@@ -2396,8 +2408,7 @@ async function showSearchChoicePrompt(tabId, searchQuery) {
 
 // Get settings
 async function getSettings() {
-  const result = await chrome.storage.local.get(['settings']);
-  return result.settings || {
+  const defaultSettings = {
     alwaysAllow: [],
     alwaysBlock: [],
     apiKey: DEFAULT_API_KEY,
@@ -2407,6 +2418,30 @@ async function getSettings() {
     autoNavigateEnabled: true,
     learningModeEnabled: true
   };
+
+  const result = await chrome.storage.local.get(['settings']);
+  const merged = { ...defaultSettings, ...(result.settings || {}) };
+
+  // Ensure boolean flags are initialized to sensible defaults
+  if (typeof merged.autoNavigateEnabled !== 'boolean') {
+    merged.autoNavigateEnabled = true;
+  }
+  if (typeof merged.learningModeEnabled !== 'boolean') {
+    merged.learningModeEnabled = true;
+  }
+
+  // Persist defaults if we had to fill them in
+  const shouldPersist = !result.settings ||
+    result.settings.autoNavigateEnabled !== merged.autoNavigateEnabled ||
+    result.settings.learningModeEnabled !== merged.learningModeEnabled ||
+    !result.settings.apiKey ||
+    !result.settings.apiUrl;
+
+  if (shouldPersist) {
+    await chrome.storage.local.set({ settings: merged });
+  }
+
+  return merged;
 }
 
 // Anti-tampering - Allow settings but warn user
