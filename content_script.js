@@ -9,6 +9,11 @@ let isBlockingActive = false;
 let currentSession = null;
 let blockedSelectors = [];
 let blockedElements = new Set();
+let chatUIInitialized = false;
+let chatMessagesEl = null;
+let chatInputEl = null;
+let chatPanelEl = null;
+let chatToggleEl = null;
 
 // Block page immediately - runs BEFORE page loads
 function blockPageImmediately() {
@@ -116,6 +121,9 @@ async function checkAlwaysBlock() {
     console.log('[Focufy] Page blocked, stopping initialization');
     return; // Don't continue if blocked
   }
+
+  // Initialize chatbot UI early so it can sit on the side while you browse
+  initChatbotUI();
   
   // Check if session is active
   try {
@@ -135,6 +143,13 @@ if (document.readyState === 'loading') {
     console.log('[Focufy] DOMContentLoaded, checking always-block again');
     await checkAlwaysBlock();
   });
+}
+
+// Ensure chatbot UI exists even if script loaded before body
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initChatbotUI, { once: true });
+} else {
+  initChatbotUI();
 }
 
 // Listen for messages from background
@@ -164,6 +179,250 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   return true;
 });
+
+// Chatbot UI creation
+function initChatbotUI() {
+  if (chatUIInitialized) return;
+  if (!document.body) return; // Wait for DOM
+  
+  chatUIInitialized = true;
+  
+  const style = document.createElement('style');
+  style.id = 'focufy-chatbot-style';
+  style.textContent = `
+    .focufy-chat-toggle {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 999999;
+      background: linear-gradient(135deg, #667eea, #5a67d8);
+      color: white;
+      border: none;
+      border-radius: 999px;
+      padding: 12px 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    .focufy-chat-toggle:hover { opacity: 0.94; }
+    .focufy-chat-toggle .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #48bb78;
+      box-shadow: 0 0 0 6px rgba(72,187,120,0.18);
+    }
+    .focufy-chat-panel {
+      position: fixed;
+      top: 64px;
+      right: 16px;
+      width: 360px;
+      height: calc(100vh - 96px);
+      max-height: 760px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+      z-index: 999999;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transform: translateX(420px);
+      transition: transform 0.25s ease, opacity 0.2s ease;
+      opacity: 0;
+    }
+    .focufy-chat-panel.open {
+      transform: translateX(0);
+      opacity: 1;
+    }
+    .focufy-chat-header {
+      padding: 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: linear-gradient(135deg, rgba(102,126,234,0.2), rgba(87,108,209,0.08));
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .focufy-chat-title { margin: 0; font-size: 16px; font-weight: 700; }
+    .focufy-chat-subtitle { margin: 2px 0 0; font-size: 12px; color: #cbd5e1; }
+    .focufy-chat-close {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #e2e8f0;
+      border-radius: 10px;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+    }
+    .focufy-chat-body {
+      flex: 1;
+      padding: 12px 14px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: radial-gradient(circle at 20% 20%, rgba(102,126,234,0.08), transparent 30%), #0b1224;
+    }
+    .focufy-msg {
+      border-radius: 12px;
+      padding: 10px 12px;
+      max-width: 92%;
+      line-height: 1.45;
+      font-size: 13px;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.14);
+      white-space: pre-wrap;
+    }
+    .focufy-msg.user {
+      align-self: flex-end;
+      background: linear-gradient(135deg, #5a67d8, #7f9cf5);
+      color: white;
+    }
+    .focufy-msg.bot {
+      align-self: flex-start;
+      background: rgba(226,232,240,0.08);
+      color: #e2e8f0;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .focufy-chat-footer {
+      padding: 12px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      background: #0f172a;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .focufy-chat-input {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.06);
+      color: #e2e8f0;
+      padding: 10px 12px;
+      resize: none;
+      min-height: 48px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    .focufy-chat-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .focufy-btn {
+      flex: 1;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: none;
+      cursor: pointer;
+      font-weight: 700;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    .focufy-btn.primary {
+      background: linear-gradient(135deg, #667eea, #5a67d8);
+      color: white;
+    }
+    .focufy-btn.secondary {
+      background: rgba(255,255,255,0.08);
+      color: #e2e8f0;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+  `;
+  document.head.appendChild(style);
+  
+  chatPanelEl = document.createElement('div');
+  chatPanelEl.className = 'focufy-chat-panel';
+  chatPanelEl.innerHTML = `
+    <div class="focufy-chat-header">
+      <div>
+        <div class="focufy-chat-title">Focufy Coach</div>
+        <div class="focufy-chat-subtitle">Page-aware chat + quizzes</div>
+      </div>
+        <button class="focufy-chat-close" aria-label="Close">×</button>
+    </div>
+    <div class="focufy-chat-body" id="focufyChatMessages"></div>
+    <div class="focufy-chat-footer">
+      <textarea class="focufy-chat-input" id="focufyChatInput" placeholder="Ask about this page or say 'quiz me'..."></textarea>
+      <div class="focufy-chat-actions">
+        <button class="focufy-btn secondary" id="focufyQuizBtn">Quiz me</button>
+        <button class="focufy-btn primary" id="focufySendBtn">Send</button>
+      </div>
+    </div>
+  `;
+  
+  chatMessagesEl = chatPanelEl.querySelector('#focufyChatMessages');
+  chatInputEl = chatPanelEl.querySelector('#focufyChatInput');
+  const sendBtn = chatPanelEl.querySelector('#focufySendBtn');
+  const quizBtn = chatPanelEl.querySelector('#focufyQuizBtn');
+  const closeBtn = chatPanelEl.querySelector('.focufy-chat-close');
+  
+  chatToggleEl = document.createElement('button');
+  chatToggleEl.className = 'focufy-chat-toggle';
+  chatToggleEl.innerHTML = `<span class="dot"></span><span>Focufy Coach</span>`;
+  
+  document.body.appendChild(chatPanelEl);
+  document.body.appendChild(chatToggleEl);
+  
+  chatToggleEl.addEventListener('click', toggleChatPanel);
+  closeBtn.addEventListener('click', toggleChatPanel);
+  sendBtn.addEventListener('click', () => submitChat());
+  quizBtn.addEventListener('click', () => submitChat('Give me a quick quiz on this page and my current focus.'));
+  
+  chatInputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submitChat();
+    }
+  });
+  
+  addChatMessage('bot', 'I am Focufy Coach. Ask about this page, or hit "Quiz me" for quick practice. I will use the page plus your learning data when available.');
+}
+
+function toggleChatPanel() {
+  if (!chatPanelEl) return;
+  chatPanelEl.classList.toggle('open');
+}
+
+function addChatMessage(role, text) {
+  if (!chatMessagesEl) return null;
+  const msg = document.createElement('div');
+  msg.className = `focufy-msg ${role}`;
+  msg.textContent = text;
+  chatMessagesEl.appendChild(msg);
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+  return msg;
+}
+
+async function submitChat(prefilled) {
+  const text = (prefilled || chatInputEl?.value || '').trim();
+  if (!text) return;
+  if (chatInputEl) chatInputEl.value = '';
+  
+  addChatMessage('user', text);
+  const thinkingEl = addChatMessage('bot', 'Thinking...');
+  
+  try {
+    const selection = window.getSelection ? (window.getSelection().toString() || '') : '';
+    const response = await chrome.runtime.sendMessage({
+      action: 'chatbotQuestion',
+      question: text,
+      selectionText: selection.substring(0, 1500),
+      pageUrl: window.location.href
+    });
+    
+    if (response?.success && response.answer) {
+      thinkingEl.textContent = response.answer;
+    } else {
+      thinkingEl.textContent = response?.error || 'I could not answer right now.';
+    }
+  } catch (error) {
+    console.error('[Focufy] Chatbot error:', error);
+    thinkingEl.textContent = 'Chatbot hit an error. Please try again.';
+  }
+}
+
 
 // Start blocking
 function startBlocking(session) {

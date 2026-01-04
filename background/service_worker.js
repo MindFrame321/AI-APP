@@ -2444,6 +2444,120 @@ async function getSettings() {
   return merged;
 }
 
+// Build chatbot prompt using page context + learning data
+async function buildChatbotPrompt(question, pageContent, selectionText = '', urlOverride = '') {
+  const settings = await getSettings();
+  const stored = await chrome.storage.local.get(['learningData']);
+  const learning = settings.learningModeEnabled ? (stored.learningData || learningData) : null;
+  
+  const sessionGoal = currentSession?.taskDescription || 'general learning';
+  const pageTitle = pageContent?.title || 'Untitled page';
+  const pageUrl = urlOverride || pageContent?.url || 'unknown';
+  
+  // Trim context to avoid giant prompts
+  const contextChunks = [];
+  if (selectionText) {
+    contextChunks.push(`User highlighted:\n${selectionText.substring(0, 1500)}`);
+  }
+  if (pageContent?.text) {
+    contextChunks.push(`Page content:\n${pageContent.text.substring(0, 5000)}`);
+  }
+  const contextText = contextChunks.join('\n\n') || 'No readable content extracted from the page.';
+  
+  const learningSummary = learning ? `
+- Main topic: ${learning.mainTopic || 'unknown'}
+- Current subtopics: ${(learning.currentSubtopics || []).slice(-5).join(', ') || 'none tracked yet'}
+- Frequent topics: ${Object.keys(learning.topicFrequency || {}).slice(0, 5).join(', ') || 'none'}
+- Recent pages: ${(learning.browsingHistory || []).slice(-3).map(h => h.title || h.url || '').join(' | ') || 'none'}
+` : 'Learning mode disabled or no data yet.';
+  
+  return `You are Focufy, a focused study chatbot that answers succinctly and can quiz the user.
+
+Study goal: "${sessionGoal}"
+Current page: ${pageTitle}
+URL: ${pageUrl}
+
+Learning mode summary:
+${learningSummary}
+
+Use the page and learning context to answer the user. If they ask for a quiz or practice, give 2-3 short, self-contained questions with brief answers or hints. Keep replies tight and actionable. If context is thin, acknowledge and give a best-effort answer. Avoid fabricating details not supported by the provided text.
+
+Context to use:
+${contextText}
+
+User question: "${question}"
+
+Respond as plain text (no JSON).`;
+}
+
+// Chatbot handler
+async function handleChatbotQuestion({ question, tabId, selectionText, pageUrl }) {
+  const settings = await getSettings();
+  const apiKey = settings?.apiKey || DEFAULT_API_KEY;
+  const backendUrl = settings?.backendUrl;
+  const tokenResult = await chrome.storage.local.get(['authToken']);
+  const authToken = tokenResult.authToken;
+  
+  // Extract page context if possible
+  let pageContent = null;
+  if (tabId) {
+    try {
+      pageContent = await extractPageContent(tabId);
+    } catch (e) {
+      console.warn('[Chatbot] Could not extract page content:', e);
+    }
+  }
+  
+  const prompt = await buildChatbotPrompt(question, pageContent, selectionText, pageUrl);
+  
+  if (!backendUrl && !apiKey) {
+    throw new Error('No API key configured for chatbot.');
+  }
+  
+  try {
+    let response;
+    if (backendUrl && authToken) {
+      response = await makeRateLimitedApiCall(() =>
+        fetch(backendUrl + '/api/analyze-page', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ prompt })
+        })
+      );
+    } else {
+      let apiUrl = settings?.apiUrl || CURRENT_MODEL_URL;
+      if (apiUrl.includes('gemini-pro') || apiUrl.includes('gemini-1.5') || apiUrl.includes('gemini-2') || apiUrl.includes('gemini-3')) {
+        apiUrl = CURRENT_MODEL_URL;
+      }
+      response = await makeRateLimitedApiCall(() =>
+        fetch(`${apiUrl}?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.35, maxOutputTokens: 600 }
+          })
+        })
+      );
+    }
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Chatbot API error: ${response.status} - ${errorText}`);
+    }
+    
+    const data = await response.json();
+    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || data.text || '';
+    return responseText.trim() || 'I could not generate a response. Please try again.';
+  } catch (error) {
+    console.error('[Chatbot] Error answering question:', error);
+    return 'I hit an issue reaching the model. Please try again in a moment or check your API key.';
+  }
+}
+
 // Anti-tampering - Allow settings but warn user
 function enforceAntiTampering() {
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
@@ -2576,6 +2690,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     sendResponse({ success: true });
     return;
+  }
+
+  if (request.action === 'chatbotQuestion') {
+    (async () => {
+      try {
+        const answer = await handleChatbotQuestion({
+          question: request.question || '',
+          tabId: sender.tab?.id,
+          selectionText: request.selectionText || '',
+          pageUrl: request.pageUrl || sender.tab?.url || ''
+        });
+        sendResponse({ success: true, answer });
+      } catch (error) {
+        console.error('[Chatbot] Failed to handle question:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true; // async
   }
   
   if (request.action === 'testBlock') {
