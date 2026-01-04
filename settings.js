@@ -54,11 +54,13 @@ async function loadSettings() {
       apiUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent',
       backendUrl: 'https://focufy-extension-1.onrender.com', // Pre-configured backend URL
       autoNavigateEnabled: true,
-      learningModeEnabled: true
+      learningModeEnabled: true,
+      focusCoachEnabled: true
     };
     
     document.getElementById('autoNavigateEnabled').checked = currentSettings.autoNavigateEnabled !== false;
     document.getElementById('learningModeEnabled').checked = currentSettings.learningModeEnabled !== false;
+    document.getElementById('focusCoachEnabled').checked = currentSettings.focusCoachEnabled !== false;
     
     // Always check API key status (will show appropriate message if not configured)
     await checkUserApiKeyStatus();
@@ -164,6 +166,7 @@ async function saveSettings() {
     currentSettings.backendUrl = 'https://focufy-extension-1.onrender.com';
     currentSettings.autoNavigateEnabled = document.getElementById('autoNavigateEnabled').checked;
     currentSettings.learningModeEnabled = document.getElementById('learningModeEnabled').checked;
+    currentSettings.focusCoachEnabled = document.getElementById('focusCoachEnabled').checked;
     
     await chrome.storage.local.set({ settings: currentSettings });
     
@@ -203,7 +206,8 @@ async function resetSettings() {
     apiUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent',
     backendUrl: 'https://focufy-extension-1.onrender.com', // Pre-configured
     autoNavigateEnabled: true,
-    learningModeEnabled: true
+    learningModeEnabled: true,
+    focusCoachEnabled: true
   };
   
   await chrome.storage.local.set({ settings: currentSettings });

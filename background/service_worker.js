@@ -109,6 +109,11 @@ async function migrateSettings() {
         needsUpdate = true;
         console.log('Enabling learning mode by default');
       }
+      if (typeof settings.focusCoachEnabled === 'undefined') {
+        settings.focusCoachEnabled = true;
+        needsUpdate = true;
+        console.log('Enabling focus coach by default');
+      }
       
       if (needsUpdate) {
         await chrome.storage.local.set({ settings });
@@ -898,6 +903,11 @@ async function analyzeAndBlockPage(tabId, url) {
         const settings = await getSettings();
         if (settings && settings.learningModeEnabled) {
           await updateLearningData(pageContent, currentSession.taskDescription);
+        }
+        try {
+          await recordBrowsingHistory(pageContent);
+        } catch (e) {
+          console.warn('[Analyze] Failed to record browsing history:', e);
         }
         
         // Analyze with Gemini - full page approach
@@ -2263,6 +2273,22 @@ async function updateLearningData(pageContent, taskDescription) {
   await chrome.storage.local.set({ learningData });
 }
 
+// Track recent browsing history for learning mode
+async function recordBrowsingHistory(pageContent) {
+  if (!pageContent) return;
+  const entry = {
+    title: pageContent.title || '',
+    url: pageContent.url || '',
+    ts: Date.now()
+  };
+  if (!learningData.browsingHistory) {
+    learningData.browsingHistory = [];
+  }
+  learningData.browsingHistory.push(entry);
+  learningData.browsingHistory = learningData.browsingHistory.slice(-10);
+  await chrome.storage.local.set({ learningData });
+}
+
 // Get smart search query based on learning data
 async function getSmartSearchQuery(taskDescription) {
   const settings = await getSettings();
@@ -2307,13 +2333,25 @@ async function autoNavigateToSearch(tabId, url, domain) {
     return false;
   }
   
-  const isHomePage = !url.includes('/search') && 
+  const urlObj = new URL(url);
+  const path = urlObj.pathname || '/';
+  const isHomePage = (path === '/' || path === '') &&
+                     !url.includes('/search') && 
                      !url.includes('/results') && 
                      !url.includes('/wiki/') &&
                      !url.includes('?q=') &&
                      !url.includes('search_query=');
+
+  // Do NOT auto-navigate when already on a content page (e.g., Reddit thread, YouTube watch page, Google result)
+  const isContentPage = path.includes('/watch') ||
+                        path.includes('/r/') ||
+                        path.includes('/comments/') ||
+                        path.includes('/gallery/') ||
+                        path.includes('/video') ||
+                        path.includes('/channel/') ||
+                        path.split('/').filter(Boolean).length > 1; // more than one segment usually means specific content
   
-  if (!isHomePage) return false;
+  if (!isHomePage || isContentPage) return false;
   
   const searchQuery = await getSmartSearchQuery(currentSession.taskDescription);
   let searchUrl = '';
@@ -2416,7 +2454,8 @@ async function getSettings() {
     schedule: null,
     backendUrl: 'https://focufy-extension-1.onrender.com', // Pre-configured backend URL
     autoNavigateEnabled: true,
-    learningModeEnabled: true
+    learningModeEnabled: true,
+    focusCoachEnabled: true
   };
 
   const result = await chrome.storage.local.get(['settings']);
@@ -2429,11 +2468,15 @@ async function getSettings() {
   if (typeof merged.learningModeEnabled !== 'boolean') {
     merged.learningModeEnabled = true;
   }
+  if (typeof merged.focusCoachEnabled !== 'boolean') {
+    merged.focusCoachEnabled = true;
+  }
 
   // Persist defaults if we had to fill them in
   const shouldPersist = !result.settings ||
     result.settings.autoNavigateEnabled !== merged.autoNavigateEnabled ||
     result.settings.learningModeEnabled !== merged.learningModeEnabled ||
+    result.settings.focusCoachEnabled !== merged.focusCoachEnabled ||
     !result.settings.apiKey ||
     !result.settings.apiUrl;
 
@@ -2497,6 +2540,10 @@ async function handleChatbotQuestion({ question, tabId, selectionText, pageUrl }
   const backendUrl = settings?.backendUrl;
   const tokenResult = await chrome.storage.local.get(['authToken']);
   const authToken = tokenResult.authToken;
+
+  if (settings.focusCoachEnabled === false) {
+    return 'Focus Coach is disabled in Settings.';
+  }
   
   // Extract page context if possible
   let pageContent = null;
@@ -2546,6 +2593,9 @@ async function handleChatbotQuestion({ question, tabId, selectionText, pageUrl }
     
     if (!response.ok) {
       const errorText = await response.text();
+      if (response.status === 401 || response.status === 403) {
+        return 'Authentication failed. Please sign in and ensure your API key is valid in Settings.';
+      }
       throw new Error(`Chatbot API error: ${response.status} - ${errorText}`);
     }
     
@@ -2554,7 +2604,7 @@ async function handleChatbotQuestion({ question, tabId, selectionText, pageUrl }
     return responseText.trim() || 'I could not generate a response. Please try again.';
   } catch (error) {
     console.error('[Chatbot] Error answering question:', error);
-    return 'I hit an issue reaching the model. Please try again in a moment or check your API key.';
+    return 'I hit an issue reaching the model. Please try again in a moment or check your API key in Settings.';
   }
 }
 

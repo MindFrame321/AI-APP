@@ -9,6 +9,7 @@ let isBlockingActive = false;
 let currentSession = null;
 let blockedSelectors = [];
 let blockedElements = new Set();
+let focusCoachEnabled = true;
 let chatUIInitialized = false;
 let chatMessagesEl = null;
 let chatInputEl = null;
@@ -123,7 +124,7 @@ async function checkAlwaysBlock() {
   }
 
   // Initialize chatbot UI early so it can sit on the side while you browse
-  initChatbotUI();
+  await maybeInitChatbotUI();
   
   // Check if session is active
   try {
@@ -147,9 +148,9 @@ if (document.readyState === 'loading') {
 
 // Ensure chatbot UI exists even if script loaded before body
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initChatbotUI, { once: true });
+  document.addEventListener('DOMContentLoaded', maybeInitChatbotUI, { once: true });
 } else {
-  initChatbotUI();
+  maybeInitChatbotUI();
 }
 
 // Listen for messages from background
@@ -180,9 +181,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 
+async function maybeInitChatbotUI() {
+  if (chatUIInitialized) return;
+  focusCoachEnabled = await getCoachEnabled();
+  if (!focusCoachEnabled) return;
+  initChatbotUI();
+}
+
+async function getCoachEnabled() {
+  try {
+    const result = await chrome.storage.local.get(['settings']);
+    if (typeof result.settings?.focusCoachEnabled === 'boolean') {
+      return result.settings.focusCoachEnabled;
+    }
+  } catch (e) {
+    console.error('[Focufy] Could not load coach setting:', e);
+  }
+  return true;
+}
+
 // Chatbot UI creation
 function initChatbotUI() {
   if (chatUIInitialized) return;
+  if (!focusCoachEnabled) return;
   if (!document.body) return; // Wait for DOM
   
   chatUIInitialized = true;
@@ -626,6 +647,14 @@ function blockEntirePage(reason) {
     childList: true,
     subtree: true
   });
+  
+  // Fallback: if overlay fails to appear, show the lightweight block page
+  setTimeout(() => {
+    if (!document.getElementById('focus-ai-overlay')) {
+      console.warn('[Focufy] Overlay missing; using fallback block page');
+      blockPageImmediately();
+    }
+  }, 1000);
   
   console.log('[Focufy] ✅ Page blocked successfully');
 }
