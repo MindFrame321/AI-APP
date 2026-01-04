@@ -239,7 +239,7 @@ async function loadSessionState() {
 }
 
 // Start focus session
-async function startSession(taskDescription, durationMinutes, subgoals = [], energyTag = null, contractText = '') {
+async function startSession(taskDescription, durationMinutes, subgoals = [], energyTag = null) {
   sessionMetrics = { tabSwitches: 0, blockedAttempts: 0, idleSeconds: 0 };
   lastActivityTs = Date.now();
 
@@ -277,8 +277,7 @@ async function startSession(taskDescription, durationMinutes, subgoals = [], ene
     active: true,
     subgoals,
     metrics: sessionMetrics,
-    energyTag,
-    contractText
+    energyTag
   };
   
   await pruneOldData();
@@ -320,12 +319,6 @@ async function startSession(taskDescription, durationMinutes, subgoals = [], ene
   
   // Track analytics
   await trackSessionStart(taskDescription, durationMinutes);
-  // Track contract start in learning feed
-  if (contractText) {
-    const feed = (await chrome.storage.local.get(['learningFeed'])).learningFeed || [];
-    feed.push({ type: 'contract', text: contractText, ts: Date.now(), goal: taskDescription });
-    await chrome.storage.local.set({ learningFeed: feed.slice(-300) });
-  }
   
   // Notify all tabs to start blocking
   const tabs = await chrome.tabs.query({});
@@ -3433,8 +3426,7 @@ async function trackSessionEnd(session) {
     startTime: session.startTime,
     endTime: session.endTime,
     smoothness,
-    energyTag: session.energyTag || null,
-    contract: session.contractText || ''
+    energyTag: session.energyTag || null
   });
   
   await chrome.storage.local.set({ 

@@ -256,8 +256,6 @@ function renderLearningFeed(feed) {
       div.innerHTML = `<strong>Session:</strong> ${item.goal || ''} <span style="color:#64748b;">(smoothness ${item.smoothness ?? '--'})</span><div style="font-size:12px;color:#6b7280;">${ts}</div>`;
     } else if (item.type === 'reflection') {
       div.innerHTML = `<strong>Reflection:</strong> ${item.text || ''}<div style="font-size:12px;color:#6b7280;">${ts}</div>`;
-    } else if (item.type === 'contract') {
-      div.innerHTML = `<strong>Contract:</strong> ${item.text || ''}<div style="font-size:12px;color:#6b7280;">${ts}</div>`;
     } else {
       div.textContent = JSON.stringify(item);
     }

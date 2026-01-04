@@ -238,15 +238,6 @@ function setupEventListeners() {
     console.log('✅ Logout button listener attached');
   }
   
-  // Goal decomposition
-  const decomposeBtn = document.getElementById('decomposeBtn');
-  if (decomposeBtn) {
-    decomposeBtn.onclick = async (e) => {
-      e.preventDefault();
-      await decomposeGoal();
-    };
-  }
-  
   // OAuth Client ID input - save on blur
   const oauthClientIdInput = document.getElementById('oauthClientId');
   if (oauthClientIdInput) {
@@ -346,23 +337,45 @@ function setupEventListeners() {
   const gamificationLink = document.getElementById('gamificationLink');
   
   if (settingsLink) {
+    const url = chrome.runtime.getURL('settings.html');
+    settingsLink.href = url;
     settingsLink.addEventListener('click', (e) => {
       e.preventDefault();
-      chrome.runtime.openOptionsPage();
+      try {
+        chrome.runtime.openOptionsPage();
+      } catch (err) {
+        try {
+          chrome.tabs.create({ url });
+        } catch {
+          window.open(url, '_blank');
+        }
+      }
     });
   }
   
   if (analyticsLink) {
+    const url = chrome.runtime.getURL('analytics.html');
+    analyticsLink.href = url;
     analyticsLink.addEventListener('click', (e) => {
       e.preventDefault();
-      chrome.tabs.create({ url: chrome.runtime.getURL('analytics.html') });
+      try {
+        chrome.tabs.create({ url });
+      } catch (err) {
+        window.open(url, '_blank');
+      }
     });
   }
   
   if (helpLink) {
+    const url = chrome.runtime.getURL('help.html');
+    helpLink.href = url;
     helpLink.addEventListener('click', (e) => {
       e.preventDefault();
-      chrome.tabs.create({ url: chrome.runtime.getURL('help.html') });
+      try {
+        chrome.tabs.create({ url });
+      } catch (err) {
+        window.open(url, '_blank');
+      }
     });
   }
   
@@ -658,7 +671,6 @@ async function startSession() {
   const durationSelect = document.getElementById('durationSelect');
   const customDuration = document.getElementById('customDuration');
   const energySelect = document.getElementById('energySelect');
-  const contractInput = document.getElementById('contractInput');
   
   const taskDescription = taskInput.value.trim();
   console.log('Task description:', taskDescription);
@@ -681,7 +693,11 @@ async function startSession() {
   
   console.log('Duration:', durationMinutes, 'minutes');
   const energyTag = energySelect ? energySelect.value || null : null;
-  const contractText = contractInput ? contractInput.value.trim() : '';
+  
+  // Auto-generate subgoals if enabled and none present
+  if (!subgoals || subgoals.length === 0) {
+    await decomposeGoal(true);
+  }
   
   try {
     console.log('Sending startSession message to background...');
@@ -690,8 +706,7 @@ async function startSession() {
       taskDescription,
       durationMinutes,
       subgoals,
-      energyTag,
-      contractText
+      energyTag
     });
     
     console.log('Start session response:', response);
@@ -815,11 +830,11 @@ async function confirmEndSession() {
   }
 }
 
-async function decomposeGoal() {
+async function decomposeGoal(silent) {
   const taskInput = document.getElementById('taskInput');
   const goal = taskInput.value.trim();
   if (!goal) {
-    showStatus('Enter a goal first', 'error');
+    if (!silent) showStatus('Enter a goal first', 'error');
     return;
   }
   try {
@@ -827,13 +842,13 @@ async function decomposeGoal() {
     if (resp?.success && resp.subgoals) {
       subgoals = resp.subgoals.map(s => ({ text: s.text || s, done: s.done || false }));
       renderSubgoals(false);
-      showStatus('Subgoals ready', 'success');
+      if (!silent) showStatus('Subgoals ready', 'success');
     } else {
-      showStatus(resp?.error || 'Could not generate subgoals', 'error');
+      if (!silent) showStatus(resp?.error || 'Could not generate subgoals', 'error');
     }
   } catch (e) {
     console.error('Decompose error', e);
-    showStatus('Error creating subgoals', 'error');
+    if (!silent) showStatus('Error creating subgoals', 'error');
   }
 }
 
