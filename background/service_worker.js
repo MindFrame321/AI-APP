@@ -186,7 +186,7 @@ async function startSession(taskDescription, durationMinutes) {
   chrome.alarms.create('sessionEnd', { when: endTime });
   startSessionMonitoring();
   
-  // Apply blocking rules for always-block list
+  // Apply blocking rules for always-block list (works independently of session)
   const settings = await getSettings();
   console.log('[startSession] Settings alwaysBlock list:', settings.alwaysBlock);
   if (settings.alwaysBlock && settings.alwaysBlock.length > 0) {
@@ -341,20 +341,15 @@ function makeDomainBlockRule(id, hostname) {
 }
 
 // Apply blocked sites using declarativeNetRequest
+// Works independently of session state - based on storage settings
 async function applyBlockedSites(blockedHostnames) {
   if (!chrome.declarativeNetRequest) {
     console.warn('[DNR] declarativeNetRequest API not available');
     return;
   }
   
-  // Reload session state first
-  if (!currentSession || !currentSession.active) {
-    await loadSessionState();
-  }
-  
-  // Only apply blocking if there's an active session
-  if (!currentSession?.active) {
-    console.log('[DNR] No active session, clearing blocking rules');
+  if (!blockedHostnames || blockedHostnames.length === 0) {
+    console.log('[DNR] No blocked sites, clearing rules');
     await clearBlockedSites();
     return;
   }
