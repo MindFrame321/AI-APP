@@ -9,6 +9,10 @@ let currentSession = null;
 let pageAnalysisCache = new Map(); // Cache per domain+task
 const CACHE_TTL = 60 * 60 * 1000; // 60 minutes (longer cache to reduce API calls)
 
+// DeclarativeNetRequest rule IDs - use range 1000-1999 for always-block rules
+const DNR_RULE_ID_START = 1000;
+const DNR_RULE_ID_END = 1999;
+
 // Learning system - tracks user's focus topics
 let learningData = {
   mainTopic: null,        // Main study goal (e.g., "linear algebra")
@@ -254,15 +258,108 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
-// Domain normalization helper
+// Domain normalization helper - normalize to hostname only
+function normalizeToHostname(input) {
+  if (!input) return null;
+  let s = (input || "").trim();
+  
+  // If user typed "example.com" without scheme, add one so URL() can parse it
+  if (!/^https?:\/\//i.test(s)) s = "https://" + s;
+  
+  let u;
+  try {
+    u = new URL(s);
+  } catch {
+    return null; // invalid
+  }
+  
+  // Remove leading www. so "www.example.com" and "example.com" are treated the same
+  return u.hostname.replace(/^www\./i, "").toLowerCase();
+}
+
+// Legacy function for backward compatibility
 function normalizeDomain(d) {
-  if (!d) return '';
-  let normalized = d.toLowerCase().trim();
-  normalized = normalized.replace(/^https?:\/\//, '');
-  normalized = normalized.split('/')[0].split('?')[0].split('#')[0];
-  normalized = normalized.replace(/^www\./, '');
-  normalized = normalized.replace(/\.$/, '');
-  return normalized;
+  const normalized = normalizeToHostname(d);
+  return normalized || '';
+}
+
+// Build a DNR rule that blocks the domain and its subdomains
+function makeDomainBlockRule(id, hostname) {
+  // This matches both the domain and any subdomain using regexFilter
+  // Example: example.com -> matches *.example.com/*
+  return {
+    id,
+    priority: 1,
+    action: { type: "block" },
+    condition: {
+      regexFilter: `^[^:]+://([^/]*\\.)?${hostname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(/|$)`,
+      resourceTypes: ["main_frame", "sub_frame"]
+    }
+  };
+}
+
+// Apply blocked sites using declarativeNetRequest
+async function applyBlockedSites(blockedHostnames) {
+  if (!chrome.declarativeNetRequest) {
+    console.warn('[DNR] declarativeNetRequest API not available');
+    return;
+  }
+  
+  // Only apply blocking if there's an active session
+  if (!currentSession?.active) {
+    console.log('[DNR] No active session, clearing blocking rules');
+    await clearBlockedSites();
+    return;
+  }
+  
+  console.log('[DNR] Applying blocked sites:', blockedHostnames);
+  
+  // Give each hostname a stable numeric ID
+  const rules = blockedHostnames
+    .filter(h => h) // Filter out null/empty
+    .map((h, idx) => makeDomainBlockRule(DNR_RULE_ID_START + idx, h));
+  
+  console.log('[DNR] Created', rules.length, 'blocking rules');
+  
+  // Remove old rules in the range
+  const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
+  const removeRuleIds = existingRules
+    .filter(rule => rule.id >= DNR_RULE_ID_START && rule.id <= DNR_RULE_ID_END)
+    .map(rule => rule.id);
+  
+  console.log('[DNR] Removing', removeRuleIds.length, 'old rules');
+  
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds,
+      addRules: rules
+    });
+    console.log('[DNR] ✅ Successfully updated blocking rules');
+  } catch (error) {
+    console.error('[DNR] ❌ Error updating rules:', error);
+    throw error;
+  }
+}
+
+// Clear all blocking rules
+async function clearBlockedSites() {
+  if (!chrome.declarativeNetRequest) {
+    console.warn('[DNR] declarativeNetRequest API not available');
+    return;
+  }
+  
+  const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
+  const removeRuleIds = existingRules
+    .filter(rule => rule.id >= DNR_RULE_ID_START && rule.id <= DNR_RULE_ID_END)
+    .map(rule => rule.id);
+  
+  if (removeRuleIds.length > 0) {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds,
+      addRules: []
+    });
+    console.log('[DNR] ✅ Cleared all blocking rules');
+  }
 }
 
 // Check if domain should be blocked
@@ -2315,6 +2412,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sessionFromStorage: storage.session,
         sessionActive: currentSession?.active
       });
+    })();
+    return true;
+  }
+  
+  if (request.action === 'updateBlockingRules') {
+    // Update DNR rules when settings change
+    (async () => {
+      const settings = await getSettings();
+      if (settings.alwaysBlock && settings.alwaysBlock.length > 0 && currentSession?.active) {
+        const normalizedBlocked = settings.alwaysBlock
+          .map(d => normalizeToHostname(d))
+          .filter(h => h);
+        await applyBlockedSites(normalizedBlocked);
+        sendResponse({ success: true });
+      } else {
+        await clearBlockedSites();
+        sendResponse({ success: true });
+      }
     })();
     return true;
   }

@@ -11,7 +11,8 @@
     "scripting",
     "activeTab",
     "identity",
-    "notifications"
+    "notifications",
+    "declarativeNetRequest"
   ],
   "host_permissions": [
     "<all_urls>"

@@ -159,6 +159,14 @@ async function saveSettings() {
     
     await chrome.storage.local.set({ settings: currentSettings });
     
+    // Update declarativeNetRequest blocking rules
+    try {
+      await chrome.runtime.sendMessage({ action: 'updateBlockingRules' });
+      console.log('Blocking rules updated');
+    } catch (err) {
+      console.error('Error updating blocking rules:', err);
+    }
+    
     // If backend URL was just added, try to generate API key
     if (currentSettings.backendUrl) {
       const result = await chrome.storage.local.get(['authToken', 'user']);
