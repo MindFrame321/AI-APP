@@ -10,13 +10,93 @@ let currentSession = null;
 let blockedSelectors = [];
 let blockedElements = new Set();
 
-// Check if current domain should be blocked (content script fallback)
+// Block page immediately - runs BEFORE page loads
+function blockPageImmediately() {
+  console.log('[Focufy] 🚫 BLOCKING PAGE IMMEDIATELY');
+  
+  // Stop page loading
+  if (document.readyState === 'loading') {
+    window.stop();
+  }
+  
+  // Replace entire page content
+  document.documentElement.innerHTML = '';
+  document.documentElement.innerHTML = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Page Blocked - Focufy</title>
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          text-align: center;
+          padding: 20px;
+          margin: 0;
+        }
+        .container {
+          max-width: 600px;
+        }
+        h1 { font-size: 48px; margin-bottom: 16px; }
+        p { font-size: 18px; opacity: 0.9; margin-bottom: 24px; }
+        .button {
+          display: inline-block;
+          padding: 12px 24px;
+          background: white;
+          color: #667eea;
+          border-radius: 8px;
+          text-decoration: none;
+          font-weight: 600;
+          margin: 8px;
+          cursor: pointer;
+          border: none;
+        }
+        .button:hover { opacity: 0.9; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>🚫 Page Blocked</h1>
+        <p>This domain is on your always-block list.</p>
+        <button class="button" onclick="window.history.back()">Go Back</button>
+        <button class="button" onclick="chrome.runtime.sendMessage({action: 'endSession'}, () => window.location.reload())">End Session</button>
+      </div>
+    </body>
+    </html>
+  `;
+  document.documentElement.scrollTop = 0;
+}
+
+// Check if current domain should be blocked (content script - runs immediately)
 async function checkAlwaysBlock() {
   try {
-    const response = await chrome.runtime.sendMessage({ action: 'checkAlwaysBlock', url: window.location.href });
-    if (response && response.shouldBlock) {
+    console.log('[Focufy] Checking always-block for:', window.location.href);
+    
+    // Get session first
+    const sessionResponse = await chrome.runtime.sendMessage({ action: 'getSession' });
+    console.log('[Focufy] Session response:', sessionResponse);
+    
+    if (!sessionResponse?.session?.active) {
+      console.log('[Focufy] No active session, not blocking');
+      return false;
+    }
+    
+    // Check if domain should be blocked
+    const blockResponse = await chrome.runtime.sendMessage({ 
+      action: 'checkAlwaysBlock', 
+      url: window.location.href 
+    });
+    
+    console.log('[Focufy] Block response:', blockResponse);
+    
+    if (blockResponse && blockResponse.shouldBlock) {
       console.log('[Focufy] 🚫 Domain is always-blocked, blocking page immediately');
-      blockEntirePage('always-blocked');
+      blockPageImmediately();
       return true;
     }
   } catch (error) {
@@ -25,13 +105,15 @@ async function checkAlwaysBlock() {
   return false;
 }
 
-// Initialize
+// Initialize - run IMMEDIATELY
 (async () => {
   console.log('[Focufy] Content script loaded on:', window.location.href);
+  console.log('[Focufy] Document ready state:', document.readyState);
   
-  // Check always-block FIRST (before anything else)
+  // Check always-block FIRST (before anything else) - run immediately
   const isBlocked = await checkAlwaysBlock();
   if (isBlocked) {
+    console.log('[Focufy] Page blocked, stopping initialization');
     return; // Don't continue if blocked
   }
   
@@ -46,6 +128,14 @@ async function checkAlwaysBlock() {
     console.error('[Focufy] Error checking session:', error);
   }
 })();
+
+// Also check on DOMContentLoaded (in case script loaded early)
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', async () => {
+    console.log('[Focufy] DOMContentLoaded, checking always-block again');
+    await checkAlwaysBlock();
+  });
+}
 
 // Listen for messages from background
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
