@@ -33,6 +33,10 @@ const DEFAULT_API_KEY = 'AIzaSyDtmZYEgp9XwqIO4VgCE8J2QH7IIE_gJt4';
   console.log('Service worker initializing...');
   await migrateSettings();
   await loadSessionState();
+  
+  // Set up webNavigation listeners immediately (they check session state internally)
+  setupWebNavigationListeners();
+  
   console.log('Service worker ready, currentSession:', currentSession ? 'active' : 'none');
 })();
 
@@ -241,23 +245,49 @@ function normalizeDomain(d) {
 
 // Check if domain should be blocked
 async function shouldBlockDomain(url) {
-  if (!currentSession?.active) return false;
+  console.log('[shouldBlockDomain] Checking:', url);
+  console.log('[shouldBlockDomain] currentSession?.active:', currentSession?.active);
+  
+  if (!currentSession?.active) {
+    console.log('[shouldBlockDomain] No active session, returning false');
+    return false;
+  }
   
   try {
     const urlObj = new URL(url);
     const domain = normalizeDomain(urlObj.hostname);
+    console.log('[shouldBlockDomain] Normalized domain:', domain);
+    
     const settings = await getSettings();
+    console.log('[shouldBlockDomain] Settings loaded, alwaysBlock (raw):', settings.alwaysBlock);
+    
     const normalizedAlwaysBlock = (settings.alwaysBlock || []).map(normalizeDomain).filter(d => d);
-    return normalizedAlwaysBlock.includes(domain);
+    console.log('[shouldBlockDomain] Normalized always-block list:', normalizedAlwaysBlock);
+    console.log('[shouldBlockDomain] Is domain in list?', normalizedAlwaysBlock.includes(domain));
+    
+    const result = normalizedAlwaysBlock.includes(domain);
+    console.log('[shouldBlockDomain] Result:', result);
+    return result;
   } catch (e) {
+    console.error('[shouldBlockDomain] Error:', e);
     return false;
   }
 }
 
-// Start monitoring
-function startSessionMonitoring() {
+// Set up webNavigation listeners ONCE (not every time session starts)
+let webNavListenersSetup = false;
+
+function setupWebNavigationListeners() {
+  if (webNavListenersSetup) {
+    console.log('[WebNav] Listeners already set up, skipping');
+    return;
+  }
+  
+  console.log('[WebNav] ⚙️ Setting up webNavigation listeners...');
+  
   // Use onBeforeNavigate to catch navigation EARLIEST (before page starts loading)
   chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
+    console.log('[WebNav] onBeforeNavigate:', details.url, 'frameId:', details.frameId);
     // Only process main frame navigation (not iframes)
     if (details.frameId !== 0) return;
     
@@ -276,11 +306,20 @@ function startSessionMonitoring() {
       return;
     }
     
+    // Check session first
+    if (!currentSession?.active) {
+      console.log('[WebNav] No active session, skipping');
+      return;
+    }
+    
     // Check if domain should be blocked
-    if (await shouldBlockDomain(details.url)) {
+    const shouldBlock = await shouldBlockDomain(details.url);
+    console.log('[WebNav] shouldBlockDomain check:', details.url, '->', shouldBlock);
+    
+    if (shouldBlock) {
       const urlObj = new URL(details.url);
       const domain = normalizeDomain(urlObj.hostname);
-      console.log('[WebNav] 🚫 Blocking domain (onBeforeNavigate):', domain);
+      console.log('[WebNav] 🚫 BLOCKING domain (onBeforeNavigate):', domain, 'URL:', details.url);
       
       // Redirect IMMEDIATELY - this happens before page loads
       try {
@@ -390,6 +429,14 @@ function startSessionMonitoring() {
   });
   
   enforceAntiTampering();
+  
+  webNavListenersSetup = true;
+  console.log('[WebNav] ✅ Listeners set up successfully');
+}
+
+// Start monitoring (just ensures listeners are set up)
+function startSessionMonitoring() {
+  setupWebNavigationListeners();
 }
 
 // Analyze page and block irrelevant elements - SIMPLIFIED VERSION
