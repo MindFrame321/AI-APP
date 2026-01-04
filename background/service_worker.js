@@ -228,9 +228,91 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
+// Domain normalization helper
+function normalizeDomain(d) {
+  if (!d) return '';
+  let normalized = d.toLowerCase().trim();
+  normalized = normalized.replace(/^https?:\/\//, '');
+  normalized = normalized.split('/')[0].split('?')[0].split('#')[0];
+  normalized = normalized.replace(/^www\./, '');
+  normalized = normalized.replace(/\.$/, '');
+  return normalized;
+}
+
+// Check if domain should be blocked
+async function shouldBlockDomain(url) {
+  if (!currentSession?.active) return false;
+  
+  try {
+    const urlObj = new URL(url);
+    const domain = normalizeDomain(urlObj.hostname);
+    const settings = await getSettings();
+    const normalizedAlwaysBlock = (settings.alwaysBlock || []).map(normalizeDomain).filter(d => d);
+    return normalizedAlwaysBlock.includes(domain);
+  } catch (e) {
+    return false;
+  }
+}
+
 // Start monitoring
 function startSessionMonitoring() {
-  // Use webNavigation API to catch ALL navigation events (including SPA navigation like YouTube)
+  // Use onBeforeNavigate to catch navigation EARLIEST (before page starts loading)
+  chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
+    // Only process main frame navigation (not iframes)
+    if (details.frameId !== 0) return;
+    
+    // Skip chrome:// and extension:// URLs
+    if (details.url.startsWith('chrome://') || 
+        details.url.startsWith('chrome-extension://') ||
+        details.url.startsWith('moz-extension://')) {
+      return;
+    }
+    
+    // Skip extension pages
+    if (details.url.includes('settings.html') ||
+        details.url.includes('blocked.html') ||
+        details.url.includes('analytics.html') ||
+        details.url.includes('help.html')) {
+      return;
+    }
+    
+    // Check if domain should be blocked
+    if (await shouldBlockDomain(details.url)) {
+      const urlObj = new URL(details.url);
+      const domain = normalizeDomain(urlObj.hostname);
+      console.log('[WebNav] 🚫 Blocking domain (onBeforeNavigate):', domain);
+      
+      // Redirect IMMEDIATELY - this happens before page loads
+      try {
+        await chrome.tabs.update(details.tabId, {
+          url: chrome.runtime.getURL(`blocked.html?reason=always-blocked&url=${encodeURIComponent(details.url)}`)
+        });
+        console.log('[WebNav] ✅ Redirect successful');
+      } catch (err) {
+        console.error('[WebNav] ❌ Redirect failed, trying script injection:', err);
+        // Fallback: inject blocking script
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: details.tabId },
+            func: (blockedUrl) => {
+              if (window.location.href !== blockedUrl) {
+                window.stop(); // Stop page loading
+                document.documentElement.innerHTML = '';
+                document.documentElement.innerHTML = '<html><head><title>Blocked</title></head><body style="font-family: Arial; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; min-height: 100vh; display: flex; align-items: center; justify-content: center;"><div><h1>🚫 Page Blocked</h1><p>This domain is on your always-block list.</p><button onclick="window.history.back()" style="padding: 12px 24px; background: white; color: #667eea; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; margin-top: 20px;">Go Back</button></div></body></html>';
+                document.documentElement.scrollTop = 0;
+              }
+            },
+            args: [chrome.runtime.getURL(`blocked.html?reason=always-blocked&url=${encodeURIComponent(details.url)}`)]
+          });
+        } catch (scriptErr) {
+          console.error('[WebNav] ❌ Script injection also failed:', scriptErr);
+        }
+      }
+      return;
+    }
+  });
+  
+  // Also use onCommitted as backup and for always-allow check
   chrome.webNavigation.onCommitted.addListener(async (details) => {
     // Only process main frame navigation (not iframes)
     if (details.frameId !== 0) return;
@@ -254,42 +336,29 @@ function startSessionMonitoring() {
       return;
     }
     
-    // Check always-block FIRST using webNavigation (before page loads)
-    const settings = await getSettings();
-    const urlObj = new URL(details.url);
-    let domain = urlObj.hostname.toLowerCase().replace(/^www\./, '');
-    
-    const normalizeDomain = (d) => {
-      if (!d) return '';
-      let normalized = d.toLowerCase().trim();
-      normalized = normalized.replace(/^https?:\/\//, '');
-      normalized = normalized.split('/')[0].split('?')[0].split('#')[0];
-      normalized = normalized.replace(/^www\./, '');
-      normalized = normalized.replace(/\.$/, '');
-      return normalized;
-    };
-    
-    const normalizedDomain = normalizeDomain(domain);
-    const normalizedAlwaysBlock = (settings.alwaysBlock || []).map(normalizeDomain).filter(d => d);
-    
-    if (normalizedAlwaysBlock.includes(normalizedDomain)) {
-      // Redirect to blocked page IMMEDIATELY
-      console.log('[WebNav] 🚫 Blocking domain via redirect:', normalizedDomain);
+    // Double-check always-block (backup)
+    if (await shouldBlockDomain(details.url)) {
+      const urlObj = new URL(details.url);
+      const domain = normalizeDomain(urlObj.hostname);
+      console.log('[WebNav] 🚫 Blocking domain (onCommitted backup):', domain);
       chrome.tabs.update(details.tabId, {
         url: chrome.runtime.getURL(`blocked.html?reason=always-blocked&url=${encodeURIComponent(details.url)}`)
       });
-      return; // Don't continue with analysis
+      return;
     }
     
-    // For always-allow, just let it through without analysis
+    // Check always-allow
+    const settings = await getSettings();
+    const urlObj = new URL(details.url);
+    const domain = normalizeDomain(urlObj.hostname);
     const normalizedAlwaysAllow = (settings.alwaysAllow || []).map(normalizeDomain).filter(d => d);
-    if (normalizedAlwaysAllow.includes(normalizedDomain)) {
-      console.log('[WebNav] ✅ Domain is always-allowed:', normalizedDomain);
+    
+    if (normalizedAlwaysAllow.includes(domain)) {
+      console.log('[WebNav] ✅ Domain is always-allowed:', domain);
       return; // Don't analyze, just allow
     }
     
     // For other domains, analyze after page loads
-    // Use a small delay to ensure page is ready
     setTimeout(async () => {
       try {
         const tab = await chrome.tabs.get(details.tabId);
@@ -2141,6 +2210,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     endSession()
       .then(() => sendResponse({ success: true }))
       .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+  
+  if (request.action === 'checkAlwaysBlock') {
+    shouldBlockDomain(request.url)
+      .then(shouldBlock => sendResponse({ shouldBlock }))
+      .catch(err => sendResponse({ shouldBlock: false }));
     return true;
   }
   

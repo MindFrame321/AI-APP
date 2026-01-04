@@ -10,9 +10,31 @@ let currentSession = null;
 let blockedSelectors = [];
 let blockedElements = new Set();
 
+// Check if current domain should be blocked (content script fallback)
+async function checkAlwaysBlock() {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'checkAlwaysBlock', url: window.location.href });
+    if (response && response.shouldBlock) {
+      console.log('[Focufy] 🚫 Domain is always-blocked, blocking page immediately');
+      blockEntirePage('always-blocked');
+      return true;
+    }
+  } catch (error) {
+    console.error('[Focufy] Error checking always-block:', error);
+  }
+  return false;
+}
+
 // Initialize
 (async () => {
   console.log('[Focufy] Content script loaded on:', window.location.href);
+  
+  // Check always-block FIRST (before anything else)
+  const isBlocked = await checkAlwaysBlock();
+  if (isBlocked) {
+    return; // Don't continue if blocked
+  }
+  
   // Check if session is active
   try {
     const response = await chrome.runtime.sendMessage({ action: 'getSession' });
