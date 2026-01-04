@@ -2453,17 +2453,40 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'updateBlockingRules') {
     // Update DNR rules when settings change
     (async () => {
+      // Reload session first
+      if (!currentSession || !currentSession.active) {
+        await loadSessionState();
+      }
+      
       const settings = await getSettings();
       if (settings.alwaysBlock && settings.alwaysBlock.length > 0 && currentSession?.active) {
         const normalizedBlocked = settings.alwaysBlock
           .map(d => normalizeToHostname(d))
           .filter(h => h);
+        console.log('[updateBlockingRules] Applying rules for:', normalizedBlocked);
         await applyBlockedSites(normalizedBlocked);
-        sendResponse({ success: true });
+        sendResponse({ success: true, rulesApplied: normalizedBlocked });
       } else {
+        console.log('[updateBlockingRules] No active session or no blocked sites, clearing rules');
         await clearBlockedSites();
-        sendResponse({ success: true });
+        sendResponse({ success: true, rulesCleared: true });
       }
+    })();
+    return true;
+  }
+  
+  if (request.action === 'debugDNR') {
+    // Debug command to check DNR rules
+    (async () => {
+      const rules = await chrome.declarativeNetRequest.getDynamicRules();
+      const blockingRules = rules.filter(r => r.id >= DNR_RULE_ID_START && r.id <= DNR_RULE_ID_END);
+      sendResponse({ 
+        allRules: rules.length,
+        blockingRules: blockingRules.length,
+        rules: blockingRules,
+        currentSession,
+        sessionActive: currentSession?.active
+      });
     })();
     return true;
   }
