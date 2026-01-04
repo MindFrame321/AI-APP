@@ -334,6 +334,11 @@ async function applyBlockedSites(blockedHostnames) {
     return;
   }
   
+  // Reload session state first
+  if (!currentSession || !currentSession.active) {
+    await loadSessionState();
+  }
+  
   // Only apply blocking if there's an active session
   if (!currentSession?.active) {
     console.log('[DNR] No active session, clearing blocking rules');
