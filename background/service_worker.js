@@ -188,12 +188,25 @@ async function startSession(taskDescription, durationMinutes) {
   
   // Apply blocking rules for always-block list
   const settings = await getSettings();
+  console.log('[startSession] Settings alwaysBlock list:', settings.alwaysBlock);
   if (settings.alwaysBlock && settings.alwaysBlock.length > 0) {
     const normalizedBlocked = settings.alwaysBlock
       .map(d => normalizeToHostname(d))
       .filter(h => h);
-    console.log('[startSession] Applying blocking rules for:', normalizedBlocked);
-    await applyBlockedSites(normalizedBlocked);
+    console.log('[startSession] Normalized blocked domains:', normalizedBlocked);
+    if (normalizedBlocked.length > 0) {
+      console.log('[startSession] Applying blocking rules for:', normalizedBlocked);
+      await applyBlockedSites(normalizedBlocked);
+      
+      // Verify rules were created
+      const rules = await chrome.declarativeNetRequest.getDynamicRules();
+      const blockingRules = rules.filter(r => r.id >= DNR_RULE_ID_START && r.id <= DNR_RULE_ID_END);
+      console.log('[startSession] ✅ Verified', blockingRules.length, 'blocking rules are active');
+    } else {
+      console.log('[startSession] ⚠️ No valid domains to block after normalization');
+    }
+  } else {
+    console.log('[startSession] No domains in always-block list');
   }
   
   // Track analytics
