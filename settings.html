@@ -109,6 +109,43 @@
         </div>
       </section>
 
+      <!-- Feature Flags -->
+      <section class="settings-section">
+        <h2>Feature Flags</h2>
+        <p class="section-description">Enable optional features. All default to OFF.</p>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="aiFeaturesEnabled">
+            <span>AI Features Enabled (gate all AI calls)</span>
+          </label>
+        </div>
+        <div class="flags-grid">
+          <label class="checkbox-label"><input type="checkbox" id="goalDecompositionEnabled"><span>Goal Decomposition</span></label>
+          <label class="checkbox-label"><input type="checkbox" id="focusQualityEnabled"><span>Focus Quality Signals</span></label>
+          <label class="checkbox-label"><input type="checkbox" id="contextualBlockingEnabled"><span>Contextual Blocking Rules</span></label>
+          <label class="checkbox-label"><input type="checkbox" id="sessionReflectionEnabled"><span>Session Reflection</span></label>
+          <label class="checkbox-label"><input type="checkbox" id="passiveCoachEnabled"><span>Passive Focus Coach</span></label>
+          <label class="checkbox-label"><input type="checkbox" id="narrativeAnalyticsEnabled"><span>Narrative Analytics</span></label>
+          <label class="checkbox-label"><input type="checkbox" id="personalContractsEnabled"><span>Personal Contracts</span></label>
+          <label class="checkbox-label"><input type="checkbox" id="pauseTaxEnabled"><span>Pause Tax</span></label>
+          <label class="checkbox-label"><input type="checkbox" id="learningFeedEnabled"><span>Learning Feed</span></label>
+          <label class="checkbox-label"><input type="checkbox" id="energyModeEnabled"><span>Energy-Based Focus Mode</span></label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="dataRetentionEnabled">
+            <span>Data Retention</span>
+          </label>
+          <div class="input-group" style="max-width:240px;">
+            <label for="dataRetentionDays" class="input-label">Retention Days</label>
+            <input type="number" id="dataRetentionDays" min="7" max="365" value="90">
+          </div>
+        </div>
+        <p class="help-text">Data Collection: When enabled, focus stats and learning data stay on-device unless you explicitly use AI features.</p>
+        <div class="actions" style="margin-top:12px;">
+          <button id="exportDataBtn" class="btn btn-secondary">Export Data (JSON)</button>
+          <button id="clearDataBtn" class="btn btn-danger">Clear Data</button>
+        </div>
+      </section>
+
       <div class="actions">
         <button id="saveBtn" class="btn btn-primary">Save Settings</button>
         <button id="resetBtn" class="btn btn-secondary">Reset to Defaults</button>

@@ -4,6 +4,28 @@
 
 let currentSettings = null;
 
+async function readSettingsRaw() {
+  try {
+    const syncResult = await chrome.storage.sync.get(['settings']);
+    if (syncResult && syncResult.settings) {
+      return syncResult.settings;
+    }
+  } catch (e) {
+    console.warn('[Settings] sync get failed, using local:', e);
+  }
+  const localResult = await chrome.storage.local.get(['settings']);
+  return localResult.settings;
+}
+
+async function writeSettingsRaw(settings) {
+  try {
+    await chrome.storage.sync.set({ settings });
+  } catch (e) {
+    console.warn('[Settings] sync set failed, writing local only:', e);
+  }
+  await chrome.storage.local.set({ settings });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   await checkSessionStatus();
   await loadSettings();
@@ -47,20 +69,50 @@ async function checkSessionStatus() {
 
 async function loadSettings() {
   try {
-    const result = await chrome.storage.local.get(['settings']);
-    currentSettings = result.settings || {
+    const stored = await readSettingsRaw();
+    currentSettings = stored || {
+      settingsVersion: 2,
+      dataVersion: 1,
       alwaysAllow: [],
       alwaysBlock: [],
       apiUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent',
-      backendUrl: 'https://focufy-extension-1.onrender.com', // Pre-configured backend URL
-      autoNavigateEnabled: true,
-      learningModeEnabled: true,
-      focusCoachEnabled: true
+      backendUrl: 'https://focufy-extension-1.onrender.com',
+      aiFeaturesEnabled: false,
+      autoNavigateEnabled: false,
+      learningModeEnabled: false,
+      focusCoachEnabled: false,
+      goalDecompositionEnabled: false,
+      focusQualityEnabled: false,
+      contextualBlockingEnabled: false,
+      sessionReflectionEnabled: false,
+      passiveCoachEnabled: false,
+      narrativeAnalyticsEnabled: false,
+      personalContractsEnabled: false,
+      pauseTaxEnabled: false,
+      learningFeedEnabled: false,
+      energyModeEnabled: false,
+      dataRetentionEnabled: false,
+      dataRetentionDays: 90
     };
     
     document.getElementById('autoNavigateEnabled').checked = currentSettings.autoNavigateEnabled !== false;
     document.getElementById('learningModeEnabled').checked = currentSettings.learningModeEnabled !== false;
     document.getElementById('focusCoachEnabled').checked = currentSettings.focusCoachEnabled !== false;
+    setFlag('aiFeaturesEnabled', currentSettings.aiFeaturesEnabled);
+    setFlag('goalDecompositionEnabled', currentSettings.goalDecompositionEnabled);
+    setFlag('focusQualityEnabled', currentSettings.focusQualityEnabled);
+    setFlag('contextualBlockingEnabled', currentSettings.contextualBlockingEnabled);
+    setFlag('sessionReflectionEnabled', currentSettings.sessionReflectionEnabled);
+    setFlag('passiveCoachEnabled', currentSettings.passiveCoachEnabled);
+    setFlag('narrativeAnalyticsEnabled', currentSettings.narrativeAnalyticsEnabled);
+    setFlag('personalContractsEnabled', currentSettings.personalContractsEnabled);
+    setFlag('pauseTaxEnabled', currentSettings.pauseTaxEnabled);
+    setFlag('learningFeedEnabled', currentSettings.learningFeedEnabled);
+    setFlag('energyModeEnabled', currentSettings.energyModeEnabled);
+    setFlag('dataRetentionEnabled', currentSettings.dataRetentionEnabled);
+    
+    const retentionInput = document.getElementById('dataRetentionDays');
+    if (retentionInput) retentionInput.value = currentSettings.dataRetentionDays || 90;
     
     // Always check API key status (will show appropriate message if not configured)
     await checkUserApiKeyStatus();
@@ -71,6 +123,11 @@ async function loadSettings() {
     console.error('Error loading settings:', error);
     showStatus('Error loading settings', 'error');
   }
+}
+
+function setFlag(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.checked = !!value;
 }
 
 function renderDomainList(listId, domains) {
@@ -167,8 +224,22 @@ async function saveSettings() {
     currentSettings.autoNavigateEnabled = document.getElementById('autoNavigateEnabled').checked;
     currentSettings.learningModeEnabled = document.getElementById('learningModeEnabled').checked;
     currentSettings.focusCoachEnabled = document.getElementById('focusCoachEnabled').checked;
+    currentSettings.aiFeaturesEnabled = document.getElementById('aiFeaturesEnabled').checked;
+    currentSettings.goalDecompositionEnabled = document.getElementById('goalDecompositionEnabled').checked;
+    currentSettings.focusQualityEnabled = document.getElementById('focusQualityEnabled').checked;
+    currentSettings.contextualBlockingEnabled = document.getElementById('contextualBlockingEnabled').checked;
+    currentSettings.sessionReflectionEnabled = document.getElementById('sessionReflectionEnabled').checked;
+    currentSettings.passiveCoachEnabled = document.getElementById('passiveCoachEnabled').checked;
+    currentSettings.narrativeAnalyticsEnabled = document.getElementById('narrativeAnalyticsEnabled').checked;
+    currentSettings.personalContractsEnabled = document.getElementById('personalContractsEnabled').checked;
+    currentSettings.pauseTaxEnabled = document.getElementById('pauseTaxEnabled').checked;
+    currentSettings.learningFeedEnabled = document.getElementById('learningFeedEnabled').checked;
+    currentSettings.energyModeEnabled = document.getElementById('energyModeEnabled').checked;
+    currentSettings.dataRetentionEnabled = document.getElementById('dataRetentionEnabled').checked;
+    const retentionInput = document.getElementById('dataRetentionDays');
+    currentSettings.dataRetentionDays = retentionInput ? parseInt(retentionInput.value || '90', 10) || 90 : 90;
     
-    await chrome.storage.local.set({ settings: currentSettings });
+    await writeSettingsRaw(currentSettings);
     
     // Update declarativeNetRequest blocking rules
     try {
@@ -201,16 +272,31 @@ async function resetSettings() {
   }
   
   currentSettings = {
+    settingsVersion: 2,
+    dataVersion: 1,
     alwaysAllow: [],
     alwaysBlock: [],
     apiUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent',
     backendUrl: 'https://focufy-extension-1.onrender.com', // Pre-configured
-    autoNavigateEnabled: true,
-    learningModeEnabled: true,
-    focusCoachEnabled: true
+    aiFeaturesEnabled: false,
+    autoNavigateEnabled: false,
+    learningModeEnabled: false,
+    focusCoachEnabled: false,
+    goalDecompositionEnabled: false,
+    focusQualityEnabled: false,
+    contextualBlockingEnabled: false,
+    sessionReflectionEnabled: false,
+    passiveCoachEnabled: false,
+    narrativeAnalyticsEnabled: false,
+    personalContractsEnabled: false,
+    pauseTaxEnabled: false,
+    learningFeedEnabled: false,
+    energyModeEnabled: false,
+    dataRetentionEnabled: false,
+    dataRetentionDays: 90
   };
   
-  await chrome.storage.local.set({ settings: currentSettings });
+  await writeSettingsRaw(currentSettings);
   await loadSettings();
   showStatus('Settings reset to defaults', 'success');
 }
@@ -218,6 +304,8 @@ async function resetSettings() {
 function setupEventListeners() {
   const saveBtn = document.getElementById('saveBtn');
   const resetBtn = document.getElementById('resetBtn');
+  const exportBtn = document.getElementById('exportDataBtn');
+  const clearBtn = document.getElementById('clearDataBtn');
   const addAlwaysAllowBtn = document.getElementById('addAlwaysAllowBtn');
   const addAlwaysBlockBtn = document.getElementById('addAlwaysBlockBtn');
   const alwaysAllowInput = document.getElementById('alwaysAllowInput');
@@ -227,6 +315,8 @@ function setupEventListeners() {
     console.error('Settings: Missing required buttons', {
       saveBtn: !!saveBtn,
       resetBtn: !!resetBtn,
+      exportBtn: !!exportBtn,
+      clearBtn: !!clearBtn,
       addAlwaysAllowBtn: !!addAlwaysAllowBtn,
       addAlwaysBlockBtn: !!addAlwaysBlockBtn
     });
@@ -235,6 +325,8 @@ function setupEventListeners() {
   
   saveBtn.addEventListener('click', saveSettings);
   resetBtn.addEventListener('click', resetSettings);
+  if (exportBtn) exportBtn.addEventListener('click', exportData);
+  if (clearBtn) clearBtn.addEventListener('click', clearData);
   
   addAlwaysAllowBtn.addEventListener('click', () => {
     console.log('Add Always Allow button clicked');
@@ -296,6 +388,34 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+async function exportData() {
+  try {
+    const data = await chrome.storage.local.get(null);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'focufy-export.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    showStatus('Data exported as JSON', 'success');
+  } catch (e) {
+    console.error('Export error', e);
+    showStatus('Failed to export data', 'error');
+  }
+}
+
+async function clearData() {
+  if (!confirm('Clear analytics, sessions, and learning data? Settings will stay.')) return;
+  try {
+    await chrome.storage.local.remove(['analytics','sessions','learningData','session','pageAnalysisCache']);
+    showStatus('Data cleared', 'success');
+  } catch (e) {
+    console.error('Clear data error', e);
+    showStatus('Failed to clear data', 'error');
+  }
 }
 
 // Check user API key status from backend

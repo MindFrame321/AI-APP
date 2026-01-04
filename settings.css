@@ -138,6 +138,13 @@ header h1 {
   text-decoration: underline;
 }
 
+.flags-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 16px;
+  margin-top: 10px;
+}
+
 .list-container {
   margin-top: 16px;
 }

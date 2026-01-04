@@ -30,7 +30,31 @@ const MAX_QUEUE_SIZE = 10;
 
 // Current supported model
 const CURRENT_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent';
-const DEFAULT_API_KEY = 'AIzaSyDtmZYEgp9XwqIO4VgCE8J2QH7IIE_gJt4';
+// Security: remove baked-in admin key. Users must provide their own key or enable backend.
+const DEFAULT_API_KEY = '';
+
+// Storage helpers
+async function readSettingsRaw() {
+  try {
+    const syncResult = await chrome.storage.sync.get(['settings']);
+    if (syncResult && syncResult.settings) {
+      return { settings: syncResult.settings, source: 'sync' };
+    }
+  } catch (e) {
+    console.warn('[Settings] sync get failed, falling back to local:', e);
+  }
+  const localResult = await chrome.storage.local.get(['settings']);
+  return { settings: localResult.settings, source: 'local' };
+}
+
+async function writeSettingsRaw(settings) {
+  try {
+    await chrome.storage.sync.set({ settings });
+  } catch (e) {
+    console.warn('[Settings] sync set failed, writing local only:', e);
+  }
+  await chrome.storage.local.set({ settings });
+}
 
 // Initialize immediately when service worker loads
 (async () => {
@@ -73,7 +97,7 @@ chrome.runtime.onStartup.addListener(async () => {
 // Migrate settings to fix deprecated model URLs
 async function migrateSettings() {
   try {
-    const result = await chrome.storage.local.get(['settings']);
+    const result = await readSettingsRaw();
     if (result.settings) {
       let needsUpdate = false;
       const settings = result.settings;
@@ -90,12 +114,12 @@ async function migrateSettings() {
         needsUpdate = true;
       }
       
-      // Update API key if using old key or if missing
+      // Remove baked-in/old API keys; do not auto-insert keys
       const OLD_API_KEY = 'AIzaSyASqArHzBl0atkALCuaincq6ymM6m8V2yk';
-      if (!settings.apiKey || settings.apiKey === OLD_API_KEY) {
-        settings.apiKey = DEFAULT_API_KEY;
+      if (settings.apiKey === OLD_API_KEY) {
+        settings.apiKey = '';
         needsUpdate = true;
-        console.log('Updating API key to new key');
+        console.log('Removing legacy embedded API key');
       }
 
       // Add defaults for new navigation/learning toggles
@@ -114,9 +138,30 @@ async function migrateSettings() {
         needsUpdate = true;
         console.log('Enabling focus coach by default');
       }
+
+      // Initialize new feature flags to off by default
+      const newFlags = [
+        'aiFeaturesEnabled','goalDecompositionEnabled','focusQualityEnabled','contextualBlockingEnabled',
+        'sessionReflectionEnabled','passiveCoachEnabled','narrativeAnalyticsEnabled','personalContractsEnabled',
+        'pauseTaxEnabled','learningFeedEnabled','energyModeEnabled','dataRetentionEnabled'
+      ];
+      newFlags.forEach(flag => {
+        if (typeof settings[flag] === 'undefined') {
+          settings[flag] = false;
+          needsUpdate = true;
+        }
+      });
+      if (typeof settings.dataRetentionDays === 'undefined') {
+        settings.dataRetentionDays = 90;
+        needsUpdate = true;
+      }
+      if (typeof settings.settingsVersion === 'undefined') {
+        settings.settingsVersion = 2;
+        needsUpdate = true;
+      }
       
       if (needsUpdate) {
-        await chrome.storage.local.set({ settings });
+        await writeSettingsRaw(settings);
         console.log('Settings migrated successfully');
       }
     }
@@ -1131,6 +1176,11 @@ async function makeRateLimitedApiCall(apiCallFn, retries = 3) {
 // Analyze individual elements (for YouTube/streaming) - ELEMENT-LEVEL BLOCKING
 async function analyzeElementsWithGemini(pageStructure, taskDescription) {
   const settings = await getSettings();
+  if (!settings.aiFeaturesEnabled) {
+    console.log('[Elements] AI disabled; using keyword fallback');
+    return analyzeElementsWithKeywords(pageStructure, taskDescription);
+  }
+
   const apiKey = settings?.apiKey || DEFAULT_API_KEY;
   const backendUrl = settings?.backendUrl;
   
@@ -1321,6 +1371,9 @@ function analyzeElementsWithKeywords(pageStructure, taskDescription) {
 // Analyze page content with Gemini (simpler scoring approach)
 async function analyzePageContent(pageContent, taskDescription) {
   const settings = await getSettings();
+  if (!settings.aiFeaturesEnabled) {
+    return { shouldBlock: false, reason: 'ai-disabled', score: 60 };
+  }
   const apiKey = settings?.apiKey || DEFAULT_API_KEY;
   const backendUrl = settings?.backendUrl;
   
@@ -2448,41 +2501,55 @@ async function showSearchChoicePrompt(tabId, searchQuery) {
 // Get settings
 async function getSettings() {
   const defaultSettings = {
+    settingsVersion: 2,
+    dataVersion: 1,
     alwaysAllow: [],
     alwaysBlock: [],
-    apiKey: DEFAULT_API_KEY,
+    apiKey: '',
     apiUrl: CURRENT_MODEL_URL,
     schedule: null,
     backendUrl: 'https://focufy-extension-1.onrender.com', // Pre-configured backend URL
-    autoNavigateEnabled: true,
-    learningModeEnabled: true,
-    focusCoachEnabled: true
+    aiFeaturesEnabled: false,
+    autoNavigateEnabled: false,
+    learningModeEnabled: false,
+    focusCoachEnabled: false,
+    goalDecompositionEnabled: false,
+    focusQualityEnabled: false,
+    contextualBlockingEnabled: false,
+    sessionReflectionEnabled: false,
+    passiveCoachEnabled: false,
+    narrativeAnalyticsEnabled: false,
+    personalContractsEnabled: false,
+    pauseTaxEnabled: false,
+    learningFeedEnabled: false,
+    energyModeEnabled: false,
+    dataRetentionEnabled: false,
+    dataRetentionDays: 90,
+    passiveCoachThreshold: 40,
+    pauseTaxDelaySeconds: 5,
+    contextualRules: [],
+    reflectionPrompts: [
+      'What helped you stay focused this session?',
+      'What will you change next time to improve focus?',
+      'What was the key takeaway from this session?'
+    ],
+    contract: null
   };
 
-  const result = await chrome.storage.local.get(['settings']);
+  const result = await readSettingsRaw();
   const merged = { ...defaultSettings, ...(result.settings || {}) };
 
   // Ensure boolean flags are initialized to sensible defaults
-  if (typeof merged.autoNavigateEnabled !== 'boolean') {
-    merged.autoNavigateEnabled = true;
-  }
-  if (typeof merged.learningModeEnabled !== 'boolean') {
-    merged.learningModeEnabled = true;
-  }
-  if (typeof merged.focusCoachEnabled !== 'boolean') {
-    merged.focusCoachEnabled = true;
-  }
+  ['aiFeaturesEnabled','autoNavigateEnabled','learningModeEnabled','focusCoachEnabled','goalDecompositionEnabled','focusQualityEnabled','contextualBlockingEnabled','sessionReflectionEnabled','passiveCoachEnabled','narrativeAnalyticsEnabled','personalContractsEnabled','pauseTaxEnabled','learningFeedEnabled','energyModeEnabled','dataRetentionEnabled'].forEach(key => {
+    if (typeof merged[key] !== 'boolean') merged[key] = defaultSettings[key];
+  });
 
   // Persist defaults if we had to fill them in
   const shouldPersist = !result.settings ||
-    result.settings.autoNavigateEnabled !== merged.autoNavigateEnabled ||
-    result.settings.learningModeEnabled !== merged.learningModeEnabled ||
-    result.settings.focusCoachEnabled !== merged.focusCoachEnabled ||
-    !result.settings.apiKey ||
-    !result.settings.apiUrl;
+    result.settings.settingsVersion !== defaultSettings.settingsVersion;
 
   if (shouldPersist) {
-    await chrome.storage.local.set({ settings: merged });
+    await writeSettingsRaw(merged);
   }
 
   return merged;
@@ -2627,8 +2694,8 @@ async function handleChatbotQuestion({ question, tabId, selectionText, pageUrl }
   const tokenResult = await chrome.storage.local.get(['authToken']);
   const authToken = tokenResult.authToken;
 
-  if (settings.focusCoachEnabled === false) {
-    return 'Focus Coach is disabled in Settings.';
+  if (settings.focusCoachEnabled === false || settings.aiFeaturesEnabled === false) {
+    return 'Focus Coach is disabled or AI features are off in Settings.';
   }
   
   // Extract page context if possible
