@@ -246,6 +246,14 @@ async function endSession() {
     console.error('Error clearing alarm:', error);
   }
   
+  // Clear blocking rules when session ends
+  try {
+    await clearBlockedSites();
+    console.log('Blocking rules cleared');
+  } catch (error) {
+    console.error('Error clearing blocking rules:', error);
+  }
+  
   pageAnalysisCache.clear();
   console.log('Page cache cleared');
   
