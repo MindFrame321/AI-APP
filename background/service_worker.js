@@ -95,14 +95,29 @@ async function migrateSettings() {
 // Load session state
 async function loadSessionState() {
   const result = await chrome.storage.local.get(['session', 'learningData']);
+  console.log('[loadSessionState] Loading from storage:', result);
+  
   if (result.session) {
     currentSession = result.session;
+    console.log('[loadSessionState] Session loaded:', currentSession);
+    console.log('[loadSessionState] Session active:', currentSession.active);
+    console.log('[loadSessionState] Current time:', Date.now());
+    console.log('[loadSessionState] Session end time:', currentSession.endTime);
+    console.log('[loadSessionState] Time remaining:', currentSession.endTime - Date.now(), 'ms');
+    
     if (Date.now() < currentSession.endTime) {
+      console.log('[loadSessionState] ✅ Session is still active, starting monitoring');
+      currentSession.active = true; // Ensure active flag is set
       startSessionMonitoring();
     } else {
+      console.log('[loadSessionState] ⚠️ Session expired, ending session');
       await endSession();
     }
+  } else {
+    console.log('[loadSessionState] No session found in storage');
+    currentSession = null;
   }
+  
   // Load learning data if exists
   if (result.learningData) {
     learningData = result.learningData;
