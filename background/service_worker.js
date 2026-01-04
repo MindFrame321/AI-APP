@@ -246,11 +246,20 @@ function normalizeDomain(d) {
 // Check if domain should be blocked
 async function shouldBlockDomain(url) {
   console.log('[shouldBlockDomain] Checking:', url);
+  
+  // Reload session from storage in case service worker restarted
+  if (!currentSession || !currentSession.active) {
+    console.log('[shouldBlockDomain] Session not in memory, reloading from storage...');
+    await loadSessionState();
+    console.log('[shouldBlockDomain] Reloaded session:', currentSession);
+  }
+  
   console.log('[shouldBlockDomain] currentSession:', currentSession);
   console.log('[shouldBlockDomain] currentSession?.active:', currentSession?.active);
   
   if (!currentSession?.active) {
     console.log('[shouldBlockDomain] ⚠️ No active session - blocking only works during active focus sessions');
+    console.log('[shouldBlockDomain] 💡 Start a focus session from the extension popup to enable blocking');
     return false;
   }
   
