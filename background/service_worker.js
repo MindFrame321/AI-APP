@@ -3235,24 +3235,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'pauseTaxDecision') {
-    if (request.choice === 'break') {
-      pauseTimers.set(sender.tab?.id, 'break');
-      await endSession();
-      sendResponse({ success: true });
-      return true;
-    }
-    // stay focused: proceed to block now
-    pauseTimers.set(sender.tab?.id, 'stay');
-    if (sender.tab?.id && sender.tab.url) {
-      try {
-        await chrome.tabs.update(sender.tab.id, {
-          url: chrome.runtime.getURL(`blocked.html?reason=always-blocked&url=${encodeURIComponent(sender.tab.url)}`)
-        });
-      } catch (e) {
-        console.error('[PauseTax] Block redirect failed:', e);
+    (async () => {
+      if (request.choice === 'break') {
+        pauseTimers.set(sender.tab?.id, 'break');
+        await endSession();
+        sendResponse({ success: true });
+        return;
       }
-    }
-    sendResponse({ success: true });
+      // stay focused: proceed to block now
+      pauseTimers.set(sender.tab?.id, 'stay');
+      if (sender.tab?.id && sender.tab.url) {
+        try {
+          await chrome.tabs.update(sender.tab.id, {
+            url: chrome.runtime.getURL(`blocked.html?reason=always-blocked&url=${encodeURIComponent(sender.tab.url)}`)
+          });
+        } catch (e) {
+          console.error('[PauseTax] Block redirect failed:', e);
+        }
+      }
+      sendResponse({ success: true });
+    })();
     return true;
   }
 
@@ -3289,9 +3291,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
     sendResponse({ success: false, error: 'No tab ID' });
-          return;
-        }
-        
+    return;
+  }
+
   if (request.action === 'signInWithGitHub') {
     try {
       // Handle GitHub OAuth flow
