@@ -340,18 +340,42 @@ function setupEventListeners() {
     const url = chrome.runtime.getURL('settings.html');
     settingsLink.href = url;
     settingsLink.target = '_blank';
+    settingsLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      try {
+        chrome.tabs.create({ url });
+      } catch (err) {
+        window.location.href = url;
+      }
+    });
   }
   
   if (analyticsLink) {
     const url = chrome.runtime.getURL('analytics.html');
     analyticsLink.href = url;
     analyticsLink.target = '_blank';
+    analyticsLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      try {
+        chrome.tabs.create({ url });
+      } catch (err) {
+        window.location.href = url;
+      }
+    });
   }
   
   if (helpLink) {
     const url = chrome.runtime.getURL('help.html');
     helpLink.href = url;
     helpLink.target = '_blank';
+    helpLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      try {
+        chrome.tabs.create({ url });
+      } catch (err) {
+        window.location.href = url;
+      }
+    });
   }
   
   if (gamificationLink) {
@@ -930,7 +954,42 @@ async function signInWithGoogle() {
     
     // Check if chrome.identity is available
     if (!chrome.identity || !chrome.identity.launchWebAuthFlow) {
-      throw new Error('Chrome Identity API not available. Make sure you\'re running as a Chrome extension.');
+      showStatus('Chrome Identity API not available. Make sure you\'re running this as an installed Chrome extension (not the raw HTML).', 'error');
+      alert('Chrome Identity API not available. Install the extension and try again.');
+      return;
+    }
+
+    // Use manifest OAuth (Chrome Identity) as primary
+    const manifestToken = await new Promise((resolve) => {
+      try {
+        chrome.identity.getAuthToken({ interactive: true }, (t) => {
+          if (chrome.runtime.lastError) {
+            resolve(null);
+          } else {
+            resolve(t);
+          }
+        });
+      } catch (e) {
+        resolve(null);
+      }
+    });
+
+    if (manifestToken) {
+      const userInfo = await fetchUserInfoFromGoogle(manifestToken);
+      if (userInfo && userInfo.email) {
+        await chrome.storage.local.set({ user: userInfo, authToken: manifestToken, tokenTimestamp: Date.now() });
+        await showUserProfile(userInfo);
+        hideLoginScreen();
+        showStatus('Signed in successfully!', 'success');
+        const result = await chrome.storage.local.get(['subscription']);
+        if (!result.subscription) {
+          await initializeTrial();
+        }
+        setTimeout(async () => {
+          await autoGenerateApiKeyAfterSignIn();
+        }, 500);
+        return;
+      }
     }
     
     // Get OAuth client ID from input or storage, fallback to default
@@ -944,7 +1003,7 @@ async function signInWithGoogle() {
     }
     
     // Fallback to default if still empty
-    if (!clientId) {
+  if (!clientId) {
       clientId = '42484888880-o3h9svrq1cp5u53hhlrooeohmin89pci.apps.googleusercontent.com';
     }
     
