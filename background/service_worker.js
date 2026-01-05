@@ -3259,20 +3259,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'saveReflection') {
-    try {
-      const { text } = request;
-      if (currentSession) {
-        currentSession.reflection = text;
-        await chrome.storage.local.set({ session: currentSession });
+    (async () => {
+      try {
+        const { text } = request;
+        if (currentSession) {
+          currentSession.reflection = text;
+          await chrome.storage.local.set({ session: currentSession });
+        }
+        const stored = await chrome.storage.local.get(['learningFeed']);
+        const feed = stored.learningFeed || [];
+        feed.push({ type: 'reflection', text, ts: Date.now(), goal: currentSession?.taskDescription });
+        await chrome.storage.local.set({ learningFeed: feed.slice(-300) });
+        sendResponse({ success: true });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
       }
-      const stored = await chrome.storage.local.get(['learningFeed']);
-      const feed = stored.learningFeed || [];
-      feed.push({ type: 'reflection', text, ts: Date.now(), goal: currentSession?.taskDescription });
-      await chrome.storage.local.set({ learningFeed: feed.slice(-300) });
-      sendResponse({ success: true });
-    } catch (e) {
-      sendResponse({ success: false, error: e.message });
-    }
+    })();
     return true;
   }
 
