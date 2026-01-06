@@ -1,9 +1,17 @@
+(() => {
+console.log("FOCUFY content_script loaded on", location.href);
 /**
  * Focufy - Content Script
  * 
  * Handles element-level blocking on pages
  * Hides/distorts distracting elements while keeping relevant content visible
  */
+
+if (window.__FOCUFY_CS_LOADED__) {
+  console.log('[Focufy] Content script already injected, skipping re-run');
+  return;
+}
+window.__FOCUFY_CS_LOADED__ = true;
 
 let isBlockingActive = false;
 let currentSession = null;
@@ -28,54 +36,40 @@ function blockPageImmediately() {
   
   // Replace entire page content
   document.documentElement.innerHTML = '';
-  document.documentElement.innerHTML = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Page Blocked - Focufy</title>
-      <style>
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          min-height: 100vh;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          text-align: center;
-          padding: 20px;
-          margin: 0;
-        }
-        .container {
-          max-width: 600px;
-        }
-        h1 { font-size: 48px; margin-bottom: 16px; }
-        p { font-size: 18px; opacity: 0.9; margin-bottom: 24px; }
-        .button {
-          display: inline-block;
-          padding: 12px 24px;
-          background: white;
-          color: #667eea;
-          border-radius: 8px;
-          text-decoration: none;
-          font-weight: 600;
-          margin: 8px;
-          cursor: pointer;
-          border: none;
-        }
-        .button:hover { opacity: 0.9; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <h1>🚫 Page Blocked</h1>
-        <p>This domain is on your always-block list.</p>
-        <button class="button" onclick="window.history.back()">Go Back</button>
-        <button class="button" onclick="chrome.runtime.sendMessage({action: 'endSession'}, () => window.location.reload())">End Session</button>
-      </div>
-    </body>
-    </html>
+  const body = document.createElement('body');
+  body.style.cssText = `
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    text-align: center;
+    padding: 20px;
+    margin: 0;
   `;
+  const container = document.createElement('div');
+  container.className = 'container';
+  container.style.maxWidth = '600px';
+  container.innerHTML = `
+    <h1 style="font-size:48px; margin-bottom:16px;">🚫 Page Blocked</h1>
+    <p style="font-size:18px; opacity:0.9; margin-bottom:24px;">This domain is on your always-block list.</p>
+  `;
+  const btnBack = document.createElement('button');
+  btnBack.className = 'button';
+  btnBack.textContent = 'Go Back';
+  btnBack.style.cssText = 'display:inline-block;padding:12px 24px;background:white;color:#667eea;border-radius:8px;text-decoration:none;font-weight:600;margin:8px;cursor:pointer;border:none;';
+  btnBack.addEventListener('click', () => window.history.back());
+  const btnEnd = document.createElement('button');
+  btnEnd.className = 'button';
+  btnEnd.textContent = 'End Session';
+  btnEnd.style.cssText = btnBack.style.cssText;
+  btnEnd.addEventListener('click', () => chrome.runtime.sendMessage({ action: 'endSession' }, () => window.location.reload()));
+  container.appendChild(btnBack);
+  container.appendChild(btnEnd);
+  body.appendChild(container);
+  document.documentElement.appendChild(body);
   document.documentElement.scrollTop = 0;
 }
 
@@ -156,23 +150,27 @@ if (document.readyState === 'loading') {
 
 // Listen for messages from background
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request?.type === '__ping') {
+    sendResponse({ ok: true });
+    return true;
+  }
   console.log('[Focufy] Message received:', request.action);
   
   if (request.action === 'startBlocking') {
     startBlocking(request.session);
-    sendResponse({ success: true });
+    sendResponse({ success: true, ok: true });
   } else if (request.action === 'stopBlocking') {
     stopBlocking();
-    sendResponse({ success: true });
+    sendResponse({ success: true, ok: true });
   } else if (request.action === 'applyBlocks') {
     applyBlocks(request.selectors || [], request.reason, request.explanation);
-    sendResponse({ success: true });
+    sendResponse({ success: true, ok: true });
   } else if (request.action === 'clearBlocks') {
     clearAllBlocks();
-    sendResponse({ success: true });
+    sendResponse({ success: true, ok: true });
   } else if (request.action === 'blockPage') {
     blockEntirePage(request.reason);
-    sendResponse({ success: true });
+    sendResponse({ success: true, ok: true });
   } else if (request.action === 'showSearchChoice') {
     showSearchChoiceModal(request.mainTopic, request.subtopic).then(choice => {
       sendResponse({ choice });
@@ -180,10 +178,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Keep channel open for async response
   } else if (request.action === 'pauseTax') {
     showPauseTaxOverlay(request.goal, request.delayMs, request.elapsed);
-    sendResponse({ success: true });
+    sendResponse({ success: true, ok: true });
   } else if (request.action === 'showPassiveCoach') {
     showPassiveCoachOverlay(request.summary, request.quiz);
-    sendResponse({ success: true });
+    sendResponse({ success: true, ok: true });
+  } else if (request.action === 'showOffTaskOverlay') {
+    showOffTaskOverlay(request.reason || 'Off-task search detected');
+    sendResponse({ success: true, ok: true });
+  } else if (request.action === 'reasonChat') {
+    openReasonChat(request.reason || 'Explain why this was blocked and whether it relates to my goal.');
+    sendResponse({ success: true, ok: true });
   }
   return true;
 });
@@ -430,6 +434,7 @@ async function submitChat(prefilled) {
   
   addChatMessage('user', text);
   const thinkingEl = addChatMessage('bot', 'Thinking...');
+  if (!thinkingEl) return;
   
   try {
     const selection = window.getSelection ? (window.getSelection().toString() || '') : '';
@@ -444,14 +449,49 @@ async function submitChat(prefilled) {
     ]);
     
     if (response?.success && response.answer) {
-      thinkingEl.textContent = response.answer;
+      if (thinkingEl) thinkingEl.textContent = response.answer;
     } else {
-      thinkingEl.textContent = response?.error || 'I could not answer right now.';
+      if (thinkingEl) thinkingEl.textContent = response?.error || 'I could not answer right now.';
     }
   } catch (error) {
     console.error('[Focufy] Chatbot error:', error);
-    thinkingEl.textContent = 'Chatbot hit an error. Please try again.';
+    if (thinkingEl) thinkingEl.textContent = 'Chatbot hit an error. Please try again.';
   }
+}
+
+function showOffTaskOverlay(reason) {
+  const existing = document.getElementById('focufy-offtask-overlay');
+  if (existing) existing.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'focufy-offtask-overlay';
+  overlay.style.cssText = `
+    position: fixed; inset: 0; background: rgba(15,23,42,0.9); color: #e2e8f0;
+    z-index: 99999999; display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 24px;
+  `;
+  overlay.innerHTML = `
+    <div style="max-width: 520px; background: #0b1224; border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:24px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,0.45);">
+      <div style="font-size:22px; font-weight:700; margin-bottom:12px;">Stay on your goal</div>
+      <div style="font-size:14px; opacity:0.85; margin-bottom:20px;">${reason || 'This looks off-task. Refocus to continue.'}</div>
+      <div style="display:flex; gap:12px; justify-content:center;">
+        <button id="focufy-offtask-close" style="padding:10px 16px; border-radius:10px; border:1px solid rgba(255,255,255,0.2); background:#111827; color:#e2e8f0; cursor:pointer;">Stay focused</button>
+        <button id="focufy-offtask-dismiss" style="padding:10px 16px; border-radius:10px; border:1px solid rgba(255,255,255,0.08); background:#1f2937; color:#9ca3af; cursor:pointer;">Dismiss</button>
+      </div>
+    </div>
+  `;
+  document.body ? document.body.appendChild(overlay) : document.documentElement.appendChild(overlay);
+  overlay.querySelector('#focufy-offtask-close')?.addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#focufy-offtask-dismiss')?.addEventListener('click', () => overlay.remove());
+}
+
+function openReasonChat(reasonText) {
+  // ensure chatbot UI exists
+  maybeInitChatbotUI();
+  if (!chatPanelEl || !chatToggleEl) return;
+  // open chat and send a prompt to reason about relevance
+  chatPanelEl.classList.add('open');
+  const prompt = `I think this page might be blocked. ${reasonText} Please decide if it actually supports my focus: "${currentSession?.taskDescription || 'my goal'}". If it does, explain why. If not, tell me briefly.`;
+  submitChat(prompt);
 }
 
 // Quiz modal for unlocking
@@ -662,11 +702,7 @@ function stopBlocking() {
 function applyBlocks(selectors, reason, explanation) {
   console.log('[Focufy] applyBlocks called with', selectors?.length || 0, 'selectors, reason:', reason);
   
-  if (!isBlockingActive) {
-    console.log('[Focufy] Blocking not active, ignoring');
-    return;
-  }
-  
+  // allow applyBlocks even if not currently active to ensure selectors apply
   clearAllBlocks();
   blockedSelectors = selectors || [];
   
@@ -866,10 +902,17 @@ function blockEntirePage(reason) {
     hideAllContent();
   });
   
-  window.focusAIObserver.observe(document.body || document.documentElement, {
-    childList: true,
-    subtree: true
-  });
+  const targetNode = document.body || document.documentElement;
+  if (targetNode) {
+    window.focusAIObserver.observe(targetNode, { childList: true, subtree: true });
+  } else {
+    document.addEventListener('DOMContentLoaded', () => {
+      const lateTarget = document.body || document.documentElement;
+      if (lateTarget && window.focusAIObserver) {
+        window.focusAIObserver.observe(lateTarget, { childList: true, subtree: true });
+      }
+    }, { once: true });
+  }
   
   // Fallback: if overlay fails to appear, show the lightweight block page
   setTimeout(() => {
@@ -937,7 +980,7 @@ function showBlockedOverlay(reason) {
         </div>
       </div>
       <div style="display:flex; flex-wrap: wrap; gap:10px; margin-top:12px;">
-        <button onclick="window.history.back()" style="
+        <button id="focufyBackBtn" style="
           padding: 12px 16px;
           background: rgba(255,255,255,0.14);
           color: white;
@@ -948,17 +991,6 @@ function showBlockedOverlay(reason) {
           cursor: pointer;
           flex:1 1 120px;
         ">Go Back</button>
-        <button id="focufyQuizUnlock" style="
-          padding: 12px 16px;
-          background: linear-gradient(135deg, #48bb78, #38a169);
-          color: white;
-          border: none;
-          border-radius: 10px;
-          font-size: 14px;
-          font-weight: 700;
-          cursor: pointer;
-          flex:1 1 160px;
-        ">Pass quiz to unlock</button>
         <button id="focufyReasonBtn" style="
           padding: 12px 16px;
           background: linear-gradient(135deg, #667eea, #5a67d8);
@@ -976,13 +1008,13 @@ function showBlockedOverlay(reason) {
   
   // Wire quiz + reasoning
   setTimeout(() => {
-    const quizBtn = document.getElementById('focufyQuizUnlock');
+    const backBtn = document.getElementById('focufyBackBtn');
     const reasonBtn = document.getElementById('focufyReasonBtn');
-    if (quizBtn) quizBtn.onclick = () => showQuizModal();
-    if (reasonBtn) reasonBtn.onclick = () => {
+    if (backBtn) backBtn.addEventListener('click', () => window.history.back());
+    if (reasonBtn) reasonBtn.addEventListener('click', () => {
       toggleChatPanel();
       submitChat('Explain why this page was blocked and if it can be allowed. Provide guidance to proceed.');
-    };
+    });
   }, 50);
   
   // Append to body
@@ -1012,6 +1044,11 @@ function observePageChanges() {
   
   const hostname = window.location.hostname;
   const isYouTube = hostname.includes('youtube.com');
+  const targetNode = document.body || document.documentElement;
+  if (!targetNode) {
+    console.warn('[Focufy] No DOM available for observer');
+    return;
+  }
   
   window.focusAIObserver = new MutationObserver((mutations) => {
     if (!isBlockingActive) return;
@@ -1052,7 +1089,7 @@ function observePageChanges() {
     });
   });
   
-  window.focusAIObserver.observe(document.body, {
+  window.focusAIObserver.observe(targetNode, {
     childList: true,
     subtree: true
   });
@@ -1080,3 +1117,5 @@ window.addEventListener('beforeunload', () => {
     window.focusAIObserver.disconnect();
   }
 });
+
+})(); 

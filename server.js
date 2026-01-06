@@ -3,9 +3,96 @@ const cors = require('cors');
 const { OAuth2Client, GoogleAuth } = require('google-auth-library');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
+const MODEL_LOCK = 'nvidia/nemotron-3-nano-30b-a3b:free';
+console.log('MODEL_LOCKED_TO=', MODEL_LOCK);
+const HAS_OR_KEY = Boolean(process.env.OPENROUTER_API_KEY);
+console.log('OpenRouter API key configured:', HAS_OR_KEY);
+
 const app = express();
 app.use(cors());
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
 app.use(express.json());
+
+// Basic health + debug routes (kept public for debugging Render routing)
+app.get('/__whoami', (req, res) => {
+  res.json({
+    ok: true,
+    entryFile: __filename,
+    cwd: process.cwd(),
+    ts: new Date().toISOString()
+  });
+});
+
+app.get('/health', (req, res) => {
+  res.json({ ok: true, hasOpenRouterKey: HAS_OR_KEY });
+});
+
+app.get('/', (req, res) => {
+  res.json({ ok: true, service: 'Focufy Backend API', hasOpenRouterKey: HAS_OR_KEY });
+});
+
+app.get('/debug/model', (req, res) => {
+  res.json({
+    model: MODEL_LOCK,
+    hasOpenRouterKey: Boolean(process.env.OPENROUTER_API_KEY)
+  });
+});
+
+app.get('/api/chat', (req, res) => {
+  res.json({ ok: true, hint: 'Use POST with {prompt}', model: MODEL_LOCK });
+});
+
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { prompt } = req.body || {};
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'prompt required', model: MODEL_LOCK, status: 400 });
+    }
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'OPENROUTER_API_KEY not set', model: MODEL_LOCK, status: 500 });
+    }
+    console.log('[/api/chat] prompt length:', prompt.length, 'using model:', MODEL_LOCK);
+    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://focufy-extension-1.onrender.com',
+        'X-Title': 'Focufy Extension'
+      },
+      body: JSON.stringify({
+        model: MODEL_LOCK,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const text = await r.text();
+    if (!r.ok) {
+      console.error('[OpenRouter] status', r.status, 'body:', text);
+      return res.status(r.status).json({ error: text || 'OpenRouter error', status: r.status, model: MODEL_LOCK });
+    }
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      console.error('[OpenRouter] JSON parse error:', text);
+      return res.status(500).json({ error: 'Invalid JSON from OpenRouter', status: 500, model: MODEL_LOCK });
+    }
+    const content = data?.choices?.[0]?.message?.content || '';
+    return res.json({ content, model: MODEL_LOCK });
+  } catch (e) {
+    console.error('[OpenRouter] unexpected error:', e);
+    return res.status(500).json({ error: 'Server error', status: 500, model: MODEL_LOCK });
+  }
+});
 
 // CONFIGURATION
 const GOOGLE_CLIENT_ID = '42484888880-r0rgoel8vrhmk5tsdtfibb0jot3vgksd.apps.googleusercontent.com'; // Same as extension
@@ -349,4 +436,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Backend proxy running on port ${PORT}`);
 });
-

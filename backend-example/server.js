@@ -2,7 +2,7 @@
 const express = require('express');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 console.log('BOOT_MARKER_2026_01_06 :: backend-example/server.js is running');
-console.log('MODEL_LOCKED_TO=mistralai/devstral-2512:free');
+console.log('MODEL_LOCKED_TO=nvidia/nemotron-3-nano-30b-a3b:free');
 
 const app = express();
 app.use(express.json());
@@ -39,7 +39,7 @@ app.get('/healthz', (req, res) => {
 // Debug model endpoint
 app.get('/debug/model', (req, res) => {
   res.json({
-    model: 'mistralai/devstral-2512:free',
+    model: 'nvidia/nemotron-3-nano-30b-a3b:free',
     hasOpenRouterKey: Boolean(process.env.OPENROUTER_API_KEY)
   });
 });
@@ -57,7 +57,7 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'prompt required' });
     }
 
-    const MODEL = 'mistralai/devstral-2512:free';
+    const MODEL = 'nvidia/nemotron-3-nano-30b-a3b:free';
     const apiKey = process.env.OPENROUTER_API_KEY;
     console.log('[/api/chat] hit. OPENROUTER_API_KEY present:', Boolean(apiKey));
     console.log('[/api/chat] prompt length:', prompt.length);

@@ -222,6 +222,14 @@
         </div>
         <div class="flag-item">
           <label class="checkbox-label">
+            <input type="checkbox" id="posthogEnabled">
+            <span><strong>PostHog Analytics (Optional)</strong></span>
+          </label>
+          <p class="flag-desc">Sends anonymized feature usage to help debug focus coach reliability.</p>
+          <p class="help-text">Off by default. No goals, content, or personal text are sent.</p>
+        </div>
+        <div class="flag-item">
+          <label class="checkbox-label">
             <input type="checkbox" id="dataRetentionEnabled">
             <span><strong>Data Retention</strong></span>
           </label>
@@ -231,7 +239,7 @@
             <input type="number" id="dataRetentionDays" min="7" max="365" value="90">
           </div>
         </div>
-        <p class="help-text">Data Collection: focus stats and learning data stay on-device unless you explicitly enable AI calls.</p>
+        <p class="help-text">Data Collection: focus stats and learning data stay on-device unless you explicitly enable AI calls or turn on PostHog analytics.</p>
         <div class="actions" style="margin-top:12px;">
           <button id="exportDataBtn" class="btn btn-secondary">Export Data (JSON)</button>
           <button id="clearDataBtn" class="btn btn-danger">Clear Data</button>

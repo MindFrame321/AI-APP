@@ -601,7 +601,7 @@ async function autoGenerateApiKeyAfterSignIn() {
     console.log('🔄 Auto-generating API key after sign-in...');
     showStatus('Setting up your API key...', 'success');
     
-    // Check if user already has an API key
+    // Check if user already has an API key and store it if present
     let statusData = null;
     try {
       const statusResponse = await fetch(`${backendUrl}/api/user-api-key`, {
@@ -614,6 +614,11 @@ async function autoGenerateApiKeyAfterSignIn() {
       if (statusResponse.ok) {
         statusData = await statusResponse.json();
         if (statusData.hasApiKey) {
+          const apiKey = statusData.apiKey || null;
+          if (apiKey) {
+            const updatedSettings = { ...(result.settings || {}), apiKey };
+            await chrome.storage.local.set({ settings: updatedSettings });
+          }
           console.log('✅ User already has an API key');
           showStatus('✅ All set! Your API key is ready.', 'success');
           return;
@@ -641,6 +646,10 @@ async function autoGenerateApiKeyAfterSignIn() {
       if (generateResponse.ok) {
         const generateData = await generateResponse.json();
         console.log('✅ API key generated successfully:', generateData);
+        if (generateData.apiKey) {
+          const updatedSettings = { ...(result.settings || {}), apiKey: generateData.apiKey };
+          await chrome.storage.local.set({ settings: updatedSettings });
+        }
         showStatus('✅ API key generated! You\'re all set.', 'success');
       } else {
         const error = await generateResponse.json().catch(() => ({ error: 'Unknown error' }));

@@ -15,8 +15,10 @@
     "declarativeNetRequest"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "https://focufy-extension-1.onrender.com/*"
   ],
+  "optional_host_permissions": [],
   "oauth2": {
     "client_id": "42484888880-o3h9svrq1cp5u53hhlrooeohmin89pci.apps.googleusercontent.com",
     "scopes": [
@@ -34,6 +36,11 @@
       "js": ["content_script.js"],
       "run_at": "document_start",
       "all_frames": false
+    },
+    {
+      "matches": ["https://www.google.com/*"],
+      "js": ["content_script.js"],
+      "run_at": "document_idle"
     }
   ],
   "action": {

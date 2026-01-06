@@ -75,7 +75,7 @@ async function loadSettings() {
       dataVersion: 1,
       alwaysAllow: [],
       alwaysBlock: [],
-      apiUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent',
+      apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
       backendUrl: 'https://focufy-extension-1.onrender.com',
       aiFeaturesEnabled: false,
       autoNavigateEnabled: false,
@@ -92,6 +92,7 @@ async function loadSettings() {
       learningFeedEnabled: false,
       energyModeEnabled: false,
       dataRetentionEnabled: false,
+      posthogEnabled: false,
       dataRetentionDays: 90
     };
     
@@ -110,6 +111,7 @@ async function loadSettings() {
     setFlag('learningFeedEnabled', currentSettings.learningFeedEnabled);
     setFlag('energyModeEnabled', currentSettings.energyModeEnabled);
     setFlag('dataRetentionEnabled', currentSettings.dataRetentionEnabled);
+    setFlag('posthogEnabled', currentSettings.posthogEnabled);
     
     const retentionInput = document.getElementById('dataRetentionDays');
     if (retentionInput) retentionInput.value = currentSettings.dataRetentionDays || 90;
@@ -219,7 +221,7 @@ function removeDomain(listType, domain) {
 async function saveSettings() {
   try {
     // API URL is now hardcoded to the default (no user configuration needed)
-    currentSettings.apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent';
+    currentSettings.apiUrl = 'https://openrouter.ai/api/v1/chat/completions';
     // Backend URL is pre-configured
     currentSettings.backendUrl = 'https://focufy-extension-1.onrender.com';
     currentSettings.autoNavigateEnabled = document.getElementById('autoNavigateEnabled').checked;
@@ -237,6 +239,7 @@ async function saveSettings() {
     currentSettings.learningFeedEnabled = document.getElementById('learningFeedEnabled').checked;
     currentSettings.energyModeEnabled = document.getElementById('energyModeEnabled').checked;
     currentSettings.dataRetentionEnabled = document.getElementById('dataRetentionEnabled').checked;
+    currentSettings.posthogEnabled = document.getElementById('posthogEnabled').checked;
     const retentionInput = document.getElementById('dataRetentionDays');
     currentSettings.dataRetentionDays = retentionInput ? parseInt(retentionInput.value || '90', 10) || 90 : 90;
     currentSettings.contextualRules = readRulesFromUI();
@@ -261,6 +264,15 @@ async function saveSettings() {
       await checkUserApiKeyStatus();
     }
     
+    // Optional telemetry (PostHog)
+    if (currentSettings.posthogEnabled) {
+      chrome.runtime.sendMessage({
+        action: 'posthogCapture',
+        event: 'settings_saved',
+        properties: { page: 'settings', posthogEnabled: true }
+      }).catch(() => {});
+    }
+    
     showStatus('Settings saved successfully!', 'success');
   } catch (error) {
     console.error('Error saving settings:', error);
@@ -278,7 +290,7 @@ async function resetSettings() {
     dataVersion: 1,
     alwaysAllow: [],
     alwaysBlock: [],
-    apiUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent',
+    apiUrl: 'https://openrouter.ai/api/v1/chat/completions',
     backendUrl: 'https://focufy-extension-1.onrender.com', // Pre-configured
     aiFeaturesEnabled: false,
     autoNavigateEnabled: false,
@@ -295,6 +307,7 @@ async function resetSettings() {
     learningFeedEnabled: false,
     energyModeEnabled: false,
     dataRetentionEnabled: false,
+    posthogEnabled: false,
     dataRetentionDays: 90,
     contextualRules: []
   };

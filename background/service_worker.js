@@ -13,6 +13,10 @@ const CACHE_TTL = 60 * 60 * 1000; // 60 minutes (longer cache to reduce API call
 const DNR_RULE_ID_START = 1000;
 const DNR_RULE_ID_END = 1999;
 
+// Supabase config (publishable key; rely on RLS)
+const SUPABASE_URL = 'https://emwuirfbximtqhqxsdop.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_N1-q6b23_qTs5qSyrlaJcw_pvbiSTVr';
+
 // Learning system - tracks user's focus topics
 let learningData = {
   mainTopic: null,        // Main study goal (e.g., "linear algebra")
@@ -28,6 +32,8 @@ let sessionMetrics = {
   idleSeconds: 0
 };
 let lastActivityTs = Date.now();
+let inFlightAnalyses = null; // disabled duplicate-analysis guard
+const ANALYSIS_COOLDOWN_MS = 0;
 
 // Rate limiting
 let apiCallQueue = [];
@@ -37,11 +43,352 @@ const MIN_API_CALL_INTERVAL = 2000; // Minimum 2 seconds between API calls
 const MAX_QUEUE_SIZE = 10;
 const pauseTimers = new Map();
 let lastPrune = 0;
+const lastNavByTab = new Map();
 
-// Current supported model
-const CURRENT_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent';
-// Security: remove baked-in admin key. Users must provide their own key or enable backend.
-const DEFAULT_API_KEY = '';
+function isDuplicateNavigation(tabId, url) {
+  const now = Date.now();
+  const last = lastNavByTab.get(tabId) || { url: '', t: 0 };
+  if (last.url === url && now - last.t < 1500) {
+    return true;
+  }
+  lastNavByTab.set(tabId, { url, t: now });
+  return false;
+}
+
+// PostHog (opt-in analytics)
+const POSTHOG_HOST = 'https://us.i.posthog.com';
+const POSTHOG_KEY = 'phc_YAl6oX7HQABYRzQvxSRezii4WsJBfql8wE9HDaT956';
+
+async function getPosthogDistinctId() {
+  try {
+    const stored = await chrome.storage.local.get(['posthogDistinctId']);
+    if (stored.posthogDistinctId) return stored.posthogDistinctId;
+    const randomId = `ph_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`;
+    await chrome.storage.local.set({ posthogDistinctId: randomId });
+    return randomId;
+  } catch (err) {
+    console.warn('[PostHog] distinct id failed:', err);
+    return `ph_${Date.now()}`;
+  }
+}
+
+async function capturePosthogEvent(eventName, properties = {}) {
+  try {
+    const settings = await getSettings();
+    if (!settings.posthogEnabled) return false;
+    const distinctId = await getPosthogDistinctId();
+    const version = chrome.runtime?.getManifest()?.version || '1.0.0';
+    const payload = {
+      api_key: POSTHOG_KEY,
+      distinct_id: distinctId,
+      event: eventName,
+      properties: {
+        ...properties,
+        $lib: 'focufy-extension',
+        $lib_version: version,
+        env: 'extension'
+      },
+      timestamp: new Date().toISOString()
+    };
+    
+    await fetch(`${POSTHOG_HOST}/capture/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return true;
+  } catch (err) {
+    console.warn('[PostHog] capture failed:', err);
+    return false;
+  }
+}
+
+function buildModelRequest(apiUrl, apiKey, prompt, temperature = 0.3, maxTokens = 500, backendUrl = '', authToken = '') {
+  const useOpenRouter = apiUrl.includes('openrouter.ai');
+  const useMistral = apiUrl.includes('mistral.ai');
+  const modelName = CURRENT_MODEL_NAME || 'devstral-2512';
+  
+  // Prefer backend proxy when no client key but backend is available
+  if (!apiKey && backendUrl) {
+    return {
+      url: `${backendUrl.replace(/\/$/, '')}/api/chat`,
+      options: {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+        },
+        body: JSON.stringify({
+          model: modelName,
+          message: prompt,
+          temperature,
+          max_tokens: maxTokens
+        })
+      }
+    };
+  }
+  
+  if (useOpenRouter) {
+    return {
+      url: apiUrl,
+      options: {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          ...(useOpenRouter ? {
+            'HTTP-Referer': 'https://focufy-extension.local',
+            'X-Title': 'Focufy Extension'
+          } : {})
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [
+            { role: 'system', content: 'You are Focufy, a concise focus assistant. When asked for structured data, return valid JSON only.' },
+            { role: 'user', content: prompt }
+          ],
+          temperature,
+          max_tokens: maxTokens
+        })
+      }
+    };
+  }
+  
+  return {
+    url: `${apiUrl}?key=${apiKey}`,
+    options: {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature, maxOutputTokens: maxTokens }
+      })
+    }
+  };
+}
+
+function extractModelText(data) {
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ||
+    data.choices?.[0]?.message?.content ||
+    data.text ||
+    '';
+}
+
+// Backend defaults
+const DEFAULT_BACKEND_URL = 'https://focufy-extension-1.onrender.com';
+const DEFAULT_BACKEND_SECRET = '';
+
+// Debug flags
+const DEBUG_FORCE_AI = true; // force AI on regardless of stored setting
+const DEBUG_BYPASS_CACHE = true; // ignore cached analyses
+
+// Current supported model (OpenRouter)
+const CURRENT_MODEL_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const CURRENT_MODEL_NAME = 'nvidia/nemotron-3-nano-30b-a3b:free';
+// Hardcoded key for OpenRouter (use backend when possible)
+const DEFAULT_API_KEY = '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';
+
+async function getBackendUrl() {
+  const { backendUrl: flatBackend } = await chrome.storage.sync.get(['backendUrl']);
+  const { settings } = await chrome.storage.sync.get(['settings']);
+  return flatBackend || settings?.backendUrl || DEFAULT_BACKEND_URL;
+}
+
+async function getBackendSecret() {
+  const { backendSecret: flatSecret } = await chrome.storage.sync.get(['backendSecret']);
+  const { settings } = await chrome.storage.sync.get(['settings']);
+  return flatSecret || settings?.backendSecret || DEFAULT_BACKEND_SECRET;
+}
+
+function isInjectableUrl(url) {
+  if (!url) return false;
+  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://') || url.startsWith('edge://') || url.startsWith('moz-extension://')) return false;
+  if (url.startsWith('about:') || url.startsWith('chrome-search://')) return false;
+  if (url.startsWith('https://chrome.google.com/webstore')) return false;
+  if (url.includes('accounts.google.com')) return false; // skip auth pages
+  // Allow http/https/file
+  return /^https?:\/\//.test(url) || url.startsWith('file://');
+}
+
+async function ensureHostPermission(originPattern) {
+  if (!originPattern) return false;
+  try {
+    const granted = await chrome.permissions.contains({ origins: [originPattern] });
+    if (granted) return true;
+    const requested = await chrome.permissions.request({ origins: [originPattern] });
+    return Boolean(requested);
+  } catch (e) {
+    console.warn('[Permissions] ensureHostPermission failed:', e?.message || e);
+    return false;
+  }
+}
+
+// Robust MV3-safe messaging with ping + fallback injection
+async function ensureContentScriptAndSend(tabId, message) {
+  let tabInfo = null;
+  try {
+    tabInfo = await chrome.tabs.get(tabId);
+  } catch (e) {
+    return null; // tab no longer exists
+  }
+
+  const targetUrl = tabInfo?.url || '';
+  if (!isInjectableUrl(targetUrl)) {
+    return null; // non-injectable pages are skipped quietly
+  }
+
+  // Request host permission for this origin if needed
+  try {
+    const originPattern = new URL(targetUrl).origin + '/*';
+    const hasPerm = await ensureHostPermission(originPattern);
+    if (!hasPerm) {
+      console.warn('[Permissions] Host permission denied for', originPattern);
+      return null;
+    }
+  } catch (e) {
+    console.warn('[Permissions] Unable to compute/request host permission for', targetUrl, '-', e?.message || e);
+    return null;
+  }
+
+  const ping = async () => {
+    try {
+      const resp = await chrome.tabs.sendMessage(tabId, { type: '__ping' });
+      return resp && resp.ok;
+    } catch (_) {
+      return false;
+    }
+  };
+
+  let alive = await ping();
+
+  if (!alive) {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['content_script.js']
+      });
+      alive = await ping();
+    } catch (e) {
+      console.warn('[Messaging] inject/ping failed for', targetUrl, '-', e?.message || e);
+      return null;
+    }
+  }
+
+  if (!alive) {
+    return null;
+  }
+
+  try {
+    const resp = await chrome.tabs.sendMessage(tabId, message);
+    return resp || null;
+  } catch (err) {
+    console.warn('[Messaging] sendMessage failed for', targetUrl, '-', err?.message || err);
+    return null;
+  }
+}
+
+// Backward compat for existing calls
+const sendMessageWithInjection = ensureContentScriptAndSend;
+
+async function callRenderLLM(prompt) {
+  const backendUrl = await getBackendUrl();
+  if (!backendUrl) throw new Error('No backendUrl configured for LLM');
+  const url = backendUrl.replace(/\/$/, '') + '/api/chat';
+  console.log('[callRenderLLM] URL:', url);
+  const secret = await getBackendSecret();
+  const headers = { 'Content-Type': 'application/json' };
+  if (secret) headers['x-extension-secret'] = secret;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ prompt })
+  });
+  const text = await resp.text();
+  if (!resp.ok) {
+    console.warn('[callRenderLLM] Error status:', resp.status, 'body:', text);
+    let parsed = {};
+    try { parsed = JSON.parse(text); } catch (e) {}
+    throw new Error(`API error: ${resp.status} - ${parsed.error || text || 'unknown'}`);
+  }
+  let data = {};
+  try { data = JSON.parse(text); } catch (e) {}
+  return data.content || text || '';
+}
+
+// Supabase helpers
+async function getUserEmail() {
+  try {
+    const { userEmail } = await chrome.storage.sync.get(['userEmail']);
+    if (userEmail) return userEmail;
+    const local = await chrome.storage.local.get(['userEmail']);
+    return local.userEmail || null;
+  } catch {
+    return null;
+  }
+}
+
+async function supabaseRequest(path, options = {}) {
+  const url = `${SUPABASE_URL}/rest/v1/${path}`;
+  const headers = Object.assign({
+    apikey: SUPABASE_KEY,
+    Authorization: `Bearer ${SUPABASE_KEY}`,
+    'Content-Type': 'application/json'
+  }, options.headers || {});
+  const resp = await fetch(url, { ...options, headers });
+  const text = await resp.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  return { resp, data, text };
+}
+
+async function supabaseLoadSettings(email) {
+  const { resp, data, text } = await supabaseRequest(`settings?user_email=eq.${encodeURIComponent(email)}`, {
+    method: 'GET'
+  });
+  if (!resp.ok) {
+    console.warn('[Supabase] load settings failed', resp.status, text?.substring?.(0, 300) || text);
+    return null;
+  }
+  if (Array.isArray(data) && data.length > 0) {
+    return data[0].settings || null;
+  }
+  return null;
+}
+
+async function supabaseSaveSettings(email, settings) {
+  const payload = { user_email: email, settings, updated_at: new Date().toISOString() };
+  const { resp, text } = await supabaseRequest('settings', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates' },
+    body: JSON.stringify(payload)
+  });
+  if (!resp.ok) {
+    console.warn('[Supabase] save settings failed', resp.status, text?.substring?.(0, 300) || text);
+  }
+}
+
+async function supabaseAddChatMessage(email, sessionId, message) {
+  if (!email || !sessionId) return;
+  const payload = {
+    id: message.id || (crypto?.randomUUID ? crypto.randomUUID() : undefined),
+    user_email: email,
+    session_id: sessionId,
+    message,
+    created_at: new Date().toISOString()
+  };
+  await supabaseRequest('chat_sessions', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates' },
+    body: JSON.stringify(payload)
+  });
+}
+
+async function supabaseDeleteChatSession(email, sessionId) {
+  if (!email || !sessionId) return;
+  await supabaseRequest(`chat_sessions?user_email=eq.${encodeURIComponent(email)}&session_id=eq.${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE'
+  });
+}
 
 // Storage helpers
 async function readSettingsRaw() {
@@ -64,6 +411,69 @@ async function writeSettingsRaw(settings) {
     console.warn('[Settings] sync set failed, writing local only:', e);
   }
   await chrome.storage.local.set({ settings });
+
+  // Also persist to Supabase if user email is known
+  try {
+    const email = await getUserEmail();
+    if (email) {
+      await supabaseSaveSettings(email, settings);
+    }
+  } catch (e) {
+    console.warn('[Settings] supabase save failed:', e?.message || e);
+  }
+}
+
+// Debug helper to inspect stored keys and apiKey presence
+async function debugApiKeyPresence() {
+  try {
+    const { apiKey } = await chrome.storage.sync.get(['apiKey']);
+    console.log('[Debug] apiKey present in sync?', Boolean(apiKey));
+    
+    const allSync = await chrome.storage.sync.get(null);
+    const allLocal = await chrome.storage.local.get(null);
+    
+    console.log('[Debug] SYNC keys:', Object.keys(allSync));
+    console.log('[Debug] LOCAL keys:', Object.keys(allLocal));
+    console.log('[Debug] SYNC apiKey exists?', Boolean(allSync.apiKey));
+    console.log('[Debug] LOCAL apiKey exists?', Boolean(allLocal.apiKey));
+    
+    console.log('[DEBUG] sync keys:', Object.keys(allSync));
+    console.log('[DEBUG] local keys:', Object.keys(allLocal));
+    console.log('[DEBUG] sync.apiKey:', allSync.apiKey ? '(present)' : '(missing)');
+    console.log('[DEBUG] local.apiKey:', allLocal.apiKey ? '(present)' : '(missing)');
+  } catch (err) {
+    console.warn('[Debug] apiKey presence check failed:', err);
+  }
+}
+
+// Backend-first analyzer to avoid storing OpenRouter keys in the extension
+async function fetchBackendAnalysis(url, taskDescription) {
+  try {
+    const { backendUrl: flatBackend } = await chrome.storage.sync.get(['backendUrl']);
+    const { settings } = await chrome.storage.sync.get(['settings']);
+    const backendUrl = flatBackend || settings?.backendUrl || '';
+    if (!backendUrl) {
+      console.log('[Analyze] AI disabled; no backendUrl');
+      return null;
+    }
+    
+    const target = `${backendUrl.replace(/\/$/, '')}/api/analyze`;
+    const r = await fetch(target, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, task: taskDescription })
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      console.warn('[Analyze] Backend analyze failed:', r.status, text);
+      return null;
+    }
+    const data = await r.json();
+    return data;
+  } catch (err) {
+    console.warn('[Analyze] Backend analyze error:', err);
+    return null;
+  }
 }
 
 // Initialize immediately when service worker loads
@@ -71,6 +481,7 @@ async function writeSettingsRaw(settings) {
   console.log('Service worker initializing...');
   await migrateSettings();
   await loadSessionState();
+  await debugApiKeyPresence();
   
   // Set up webNavigation listeners immediately
   setupWebNavigationListeners();
@@ -268,8 +679,10 @@ async function startSession(taskDescription, durationMinutes, subgoals = [], ene
   
   const startTime = Date.now();
   const endTime = startTime + (durationMinutes * 60 * 1000);
+  const sessionId = (crypto?.randomUUID ? crypto.randomUUID() : `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`);
   
   currentSession = {
+    sessionId,
     taskDescription,
     startTime,
     endTime,
@@ -283,7 +696,7 @@ async function startSession(taskDescription, durationMinutes, subgoals = [], ene
   await pruneOldData();
   
   console.log('[startSession] Creating session:', currentSession);
-  await chrome.storage.local.set({ session: currentSession });
+  await chrome.storage.local.set({ session: currentSession, currentSession });
   console.log('[startSession] ✅ Session saved to storage');
   
   // Verify it was saved
@@ -323,8 +736,8 @@ async function startSession(taskDescription, durationMinutes, subgoals = [], ene
   // Notify all tabs to start blocking
   const tabs = await chrome.tabs.query({});
   tabs.forEach(tab => {
-    if (tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
-      chrome.tabs.sendMessage(tab.id, {
+    if (isInjectableUrl(tab.url)) {
+      sendMessageWithInjection(tab.id, {
         action: 'startBlocking',
         session: currentSession
       }).catch(() => {}); // Ignore errors for tabs that can't receive messages
@@ -344,6 +757,14 @@ async function endSession() {
     currentSession.metrics = sessionMetrics;
     // Track session completion
     await trackSessionEnd(currentSession);
+    try {
+      const email = await getUserEmail();
+      if (email && currentSession.sessionId) {
+        await supabaseDeleteChatSession(email, currentSession.sessionId);
+      }
+    } catch (e) {
+      console.warn('[Session] Failed to clear chat session in Supabase:', e?.message || e);
+    }
     }
   } catch (error) {
     console.error('Error tracking session end:', error);
@@ -386,9 +807,9 @@ async function endSession() {
   const tabs = await chrome.tabs.query({});
     console.log('Notifying', tabs.length, 'tabs to stop blocking');
     for (const tab of tabs) {
-      if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+      if (tab.id && isInjectableUrl(tab.url)) {
         try {
-          await chrome.tabs.sendMessage(tab.id, { action: 'stopBlocking' });
+          await sendMessageWithInjection(tab.id, { action: 'stopBlocking' });
           console.log('Sent stopBlocking to tab', tab.id);
         } catch (err) {
           // Tab might not have content script, that's okay
@@ -558,7 +979,7 @@ async function handlePauseTax(tabId, targetUrl, reason) {
   const delayMs = (settings.pauseTaxDelaySeconds || 5) * 1000;
   pauseTimers.set(tabId, 'pending');
   try {
-    await chrome.tabs.sendMessage(tabId, {
+    await sendMessageWithInjection(tabId, {
       action: 'pauseTax',
       delayMs,
       goal: currentSession?.taskDescription || 'Your goal',
@@ -651,6 +1072,13 @@ async function shouldBlockDomain(url) {
   }
 }
 
+async function getCurrentSessionFromStorage() {
+  const { session } = await chrome.storage.local.get(['session']);
+  if (session) return session;
+  const { currentSession } = await chrome.storage.local.get(['currentSession']);
+  return currentSession || null;
+}
+
 // Set up webNavigation listeners ONCE (not every time session starts)
 let webNavListenersSetup = false;
 
@@ -667,6 +1095,10 @@ function setupWebNavigationListeners() {
     console.log('[WebNav] onBeforeNavigate:', details.url, 'frameId:', details.frameId);
     // Only process main frame navigation (not iframes)
     if (details.frameId !== 0) return;
+    if (isDuplicateNavigation(details.tabId, details.url)) {
+      console.log('[WebNav] Duplicate navigation, skipping onBeforeNavigate');
+      return;
+    }
     
     // Skip chrome:// and extension:// URLs
     if (details.url.startsWith('chrome://') || 
@@ -729,6 +1161,10 @@ function setupWebNavigationListeners() {
   chrome.webNavigation.onCommitted.addListener(async (details) => {
     // Only process main frame navigation (not iframes)
     if (details.frameId !== 0) return;
+    if (isDuplicateNavigation(details.tabId, details.url)) {
+      console.log('[WebNav] Duplicate navigation, skipping onCommitted');
+      return;
+    }
     
     // Skip chrome:// and extension:// URLs
     if (details.url.startsWith('chrome://') || 
@@ -840,6 +1276,14 @@ function stopIdleMonitor() {
 
 // Analyze page and block irrelevant elements - SIMPLIFIED VERSION
 async function analyzeAndBlockPage(tabId, url) {
+  const analysisKey = `${tabId}:${url}`;
+  // Duplicate-analysis guard disabled
+
+  const storedSession = await getCurrentSessionFromStorage();
+  if (storedSession) {
+    currentSession = storedSession;
+  }
+  
   if (!currentSession || !currentSession.active) {
     console.log('No active session, skipping analysis');
     return;
@@ -862,11 +1306,15 @@ async function analyzeAndBlockPage(tabId, url) {
     const urlObj = new URL(url);
     let domain = urlObj.hostname.toLowerCase().replace(/^www\./, ''); // Normalize: lowercase, remove www
     console.log('[Analyze] Analyzing page:', domain, 'Task:', currentSession.taskDescription);
+    // Google search special handling removed
     
     // Note: Always-block/allow is now handled in webNavigation.onCommitted
     // This function only runs for domains that passed the webNavigation check
     const settings = await getSettings();
-    console.log('[Analyze] Settings loaded, API Key present:', !!settings.apiKey);
+    const backendUrl = await getBackendUrl();
+    const aiEnabledRaw = settings.aiFeaturesEnabled !== false && !!backendUrl;
+    const aiEnabled = DEBUG_FORCE_AI ? true : aiEnabledRaw;
+    console.log('[Analyze] AI enabled:', aiEnabled, '(raw:', aiEnabledRaw, ') Backend URL:', backendUrl || 'missing', 'Cache bypass:', DEBUG_BYPASS_CACHE);
     
     // Double-check always-allow (safety net in case webNavigation missed it)
     const normalizeDomain = (d) => {
@@ -885,7 +1333,7 @@ async function analyzeAndBlockPage(tabId, url) {
     if (normalizedAlwaysAllow.includes(normalizedDomain)) {
       // Always allowed - don't block anything
       console.log('[Analyze] ✅ Domain is in always-allow list, clearing all blocks');
-      chrome.tabs.sendMessage(tabId, { action: 'clearBlocks' }).catch((err) => {
+      sendMessageWithInjection(tabId, { action: 'clearBlocks' }).catch((err) => {
         console.error('[Analyze] Error sending clearBlocks message:', err);
       });
       return;
@@ -895,51 +1343,37 @@ async function analyzeAndBlockPage(tabId, url) {
     const cacheKey = `${domain}:${currentSession.taskDescription}`;
     const domainOnlyCacheKey = `domain:${domain}`; // Declare once for reuse
     
-    const cached = pageAnalysisCache.get(cacheKey);
+    const cached = DEBUG_BYPASS_CACHE ? null : pageAnalysisCache.get(cacheKey);
     
-    if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+    if (cached && (Date.now() - cached.timestamp) < CACHE_TTL && !(cached.reason === 'ai-disabled' && aiEnabled)) {
       // Use cached analysis
       console.log('Using cached analysis (avoiding API call)');
-      let cachedAction;
-      if (cached.shouldBlock && cached.selectors.includes('body')) {
-        cachedAction = 'blockPage';
-      } else if (cached.selectors && cached.selectors.length > 0) {
-        cachedAction = 'applyBlocks';
-      } else {
-        cachedAction = 'clearBlocks';
-      }
-      
-      chrome.tabs.sendMessage(tabId, {
-        action: cachedAction,
-        selectors: cached.selectors || [],
-        reason: cached.reason,
-        shouldBlock: cached.shouldBlock,
-        score: cached.score
-      }).catch(() => {});
+    const cachedAction = cached.shouldBlock ? 'blockPage' : 'clearBlocks';
+    
+    sendMessageWithInjection(tabId, {
+      action: cachedAction,
+      selectors: cachedAction === 'blockPage' ? ['body'] : [],
+      reason: cached.reason,
+      shouldBlock: cached.shouldBlock,
+      score: cached.score
+    }).catch(() => {});
       return;
     }
     
     // Also check if we've analyzed this domain recently (even with different tasks)
     // This helps reduce API calls when user visits same site multiple times
-    const domainCached = pageAnalysisCache.get(domainOnlyCacheKey);
+    const domainCached = DEBUG_BYPASS_CACHE ? null : pageAnalysisCache.get(domainOnlyCacheKey);
     if (domainCached && (Date.now() - domainCached.timestamp) < (CACHE_TTL / 2)) {
       console.log('Using domain-level cached analysis');
-      let cachedAction;
-      if (domainCached.shouldBlock && domainCached.selectors && domainCached.selectors.includes('body')) {
-        cachedAction = 'blockPage';
-      } else if (domainCached.selectors && domainCached.selectors.length > 0) {
-        cachedAction = 'applyBlocks';
-      } else {
-        cachedAction = 'clearBlocks';
-      }
-      
-      chrome.tabs.sendMessage(tabId, {
-        action: cachedAction,
-        selectors: domainCached.selectors || [],
-        reason: domainCached.reason,
-        shouldBlock: domainCached.shouldBlock,
-        score: domainCached.score
-      }).catch(() => {});
+    const cachedAction = domainCached.shouldBlock ? 'blockPage' : 'clearBlocks';
+    
+    sendMessageWithInjection(tabId, {
+      action: cachedAction,
+      selectors: cachedAction === 'blockPage' ? ['body'] : [],
+      reason: domainCached.reason,
+      shouldBlock: domainCached.shouldBlock,
+      score: domainCached.score
+    }).catch(() => {});
       return;
     }
     
@@ -987,6 +1421,15 @@ async function analyzeAndBlockPage(tabId, url) {
           hasRelatedContent: analysis.hasRelatedContent
         });
         analysis.shouldBlock = false; // Never block search pages themselves
+        const total = analysis.totalElements || pageStructure.elements.length;
+        if (!analysis.shouldBlock && analysis.selectorsToBlock && total > 0) {
+          const ratio = analysis.selectorsToBlock.length / total;
+          if (ratio >= 0.8) {
+            analysis.shouldBlock = true;
+            analysis.reason = 'irrelevant-high-ratio';
+            analysis.selectorsToBlock = ['body'];
+          }
+        }
       } else {
         // No search results yet or couldn't extract - allow the page
         analysis = {
@@ -996,13 +1439,14 @@ async function analyzeAndBlockPage(tabId, url) {
           selectorsToBlock: []
         };
       }
-    } else if (isYouTube || isStreaming) {
-      // ELEMENT-LEVEL BLOCKING for YouTube/Streaming
-      console.log('[Analyze] YouTube/Streaming detected - using element-level analysis');
+  } else if (isYouTube || isStreaming) {
+    // ELEMENT-LEVEL BLOCKING for YouTube/Streaming
+    console.log('[Analyze] YouTube/Streaming detected - using element-level analysis');
       
       // Check if we're on a watch page (watching a specific video)
       const isWatchPage = url.includes('/watch') || url.includes('/embed/');
       const isSearchPage = url.includes('/results?search_query=');
+      let highIrrelevance = false;
       
       // Wait a bit for YouTube's dynamic content to load (especially for SPA navigation)
       console.log('[Analyze] Waiting for YouTube content to load...');
@@ -1036,6 +1480,16 @@ async function analyzeAndBlockPage(tabId, url) {
         
         // Analyze individual elements
         analysis = await analyzeElementsWithGemini(pageStructure, currentSession.taskDescription);
+        const total = analysis.totalElements || pageStructure.elements.length;
+        if (!analysis.shouldBlock && analysis.selectorsToBlock && total > 0) {
+          const ratio = analysis.selectorsToBlock.length / total;
+          if (ratio >= 0.8) {
+            analysis.shouldBlock = true;
+            analysis.reason = 'irrelevant-high-ratio';
+            analysis.selectorsToBlock = ['body'];
+            highIrrelevance = true;
+          }
+        }
         
         console.log('[Analyze] Element analysis complete!');
         console.log('[Analyze] Result:', {
@@ -1044,12 +1498,16 @@ async function analyzeAndBlockPage(tabId, url) {
           reason: analysis.reason
         });
         
-        // NEVER block the entire YouTube page - only block specific unrelated elements
+        const allowFullPage = !highIrrelevance;
+        
+        // NEVER block the entire YouTube page unless almost everything is unrelated
         // Even if no related content found, allow the page (user might be watching something)
-        analysis.shouldBlock = false; // Never block entire page
+        if (allowFullPage) {
+          analysis.shouldBlock = false; // Never block entire page when content is mixed
+        }
         
         // Filter out selectors that might block the main player
-        if (analysis.selectorsToBlock) {
+        if (analysis.selectorsToBlock && allowFullPage) {
           analysis.selectorsToBlock = analysis.selectorsToBlock.filter(sel => {
             // Don't block main player, primary content, or body
             return !sel.includes('body') && 
@@ -1098,19 +1556,27 @@ async function analyzeAndBlockPage(tabId, url) {
         
         // Analyze with Gemini - full page approach
         const pageAnalysis = await analyzePageContent(pageContent, currentSession.taskDescription);
+        // Normalize selectors from pageAnalysis
+        let selectors = [];
+        if (Array.isArray(pageAnalysis.selectorsToBlock) && pageAnalysis.selectorsToBlock.length > 0) {
+          selectors = pageAnalysis.selectorsToBlock;
+        } else if (Array.isArray(pageAnalysis.blockSelectors) && pageAnalysis.blockSelectors.length > 0) {
+          selectors = pageAnalysis.blockSelectors;
+        }
         
         analysis = {
           shouldBlock: pageAnalysis.shouldBlock || false,
           score: pageAnalysis.score || 50,
           reason: pageAnalysis.reason || 'analyzed',
-          selectorsToBlock: pageAnalysis.shouldBlock ? ['body'] : [],
-          hasRelatedContent: !pageAnalysis.shouldBlock
+          selectorsToBlock: selectors,
+          hasRelatedContent: pageAnalysis.hasRelatedContent !== undefined ? pageAnalysis.hasRelatedContent : !pageAnalysis.shouldBlock
         };
         
         console.log('[Analyze] Full-page analysis result:', {
           shouldBlock: analysis.shouldBlock,
           score: analysis.score,
-          reason: analysis.reason
+          reason: analysis.reason,
+          selectorsCount: selectors.length
         });
       }
     }
@@ -1141,33 +1607,53 @@ async function analyzeAndBlockPage(tabId, url) {
     }
     
     // Apply blocks
-    let action;
-    if (analysis.shouldBlock && analysis.selectorsToBlock && analysis.selectorsToBlock.includes('body')) {
-      action = 'blockPage'; // Block entire page
-    } else if (analysis.selectorsToBlock && analysis.selectorsToBlock.length > 0) {
-      action = 'applyBlocks'; // Block specific elements
-    } else {
-      action = 'clearBlocks'; // No blocking needed
+    const selectors = analysis.selectorsToBlock || [];
+    const hasSelectors = selectors.length > 0;
+    let action = 'clearBlocks';
+    if (analysis.shouldBlock) {
+      action = 'blockPage';
+    } else if (hasSelectors) {
+      action = 'applyBlocks';
     }
     
     console.log('[Block] Sending', action, 'to tab', tabId);
     console.log('[Block] Analysis:', {
       shouldBlock: analysis.shouldBlock,
-      selectorsCount: analysis.selectorsToBlock?.length || 0,
+      selectorsCount: selectors.length,
       reason: analysis.reason
     });
     
     try {
+      // Ensure content script is present before messaging
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: ['content_script.js']
+        });
+      } catch (injErr) {
+        console.warn('[Block] Could not inject content script (may already be there):', injErr?.message || injErr);
+      }
+      
       const message = {
         action: action,
         reason: analysis.reason || 'irrelevant',
         score: analysis.score || 50,
-        selectors: analysis.selectorsToBlock || [],
+        selectors: action === 'blockPage' ? ['body'] : (action === 'applyBlocks' ? selectors : []),
         explanation: analysis.reason ? `Blocked because: ${analysis.reason}` : undefined
       };
-      
-      await chrome.tabs.sendMessage(tabId, message);
-      console.log('[Block] ✅ Successfully sent', action, 'message');
+      const resp = await sendMessageWithInjection(tabId, message);
+      if (resp && (resp.ok || resp.success)) {
+        console.log('[Block] ✅ Successfully sent', action, 'message');
+      } else {
+        console.warn('[Block] Message sent but no ok response for', action);
+      }
+      if (analysis.shouldBlock) {
+        // prompt user to reason with AI in chat
+        await sendMessageWithInjection(tabId, {
+          action: 'reasonChat',
+          reason: analysis.reason || 'Help me decide if this page is relevant'
+        });
+      }
     } catch (err) {
       console.error('[Block] ❌ Failed to send message:', err);
       
@@ -1180,7 +1666,7 @@ async function analyzeAndBlockPage(tabId, url) {
         
         setTimeout(async () => {
           try {
-            await chrome.tabs.sendMessage(tabId, {
+            await sendMessageWithInjection(tabId, {
               action: action,
               reason: analysis.reason || 'irrelevant',
               selectors: analysis.selectorsToBlock || []
@@ -1196,6 +1682,8 @@ async function analyzeAndBlockPage(tabId, url) {
     
   } catch (error) {
     console.error('Error analyzing page:', error);
+  } finally {
+    // No in-flight cleanup needed
   }
 }
 
@@ -1317,21 +1805,8 @@ async function makeRateLimitedApiCall(apiCallFn, retries = 3) {
 // Analyze individual elements (for YouTube/streaming) - ELEMENT-LEVEL BLOCKING
 async function analyzeElementsWithGemini(pageStructure, taskDescription) {
   const settings = await getSettings();
-  if (!settings.aiFeaturesEnabled) {
-    console.log('[Elements] AI disabled; using keyword fallback');
-    return analyzeElementsWithKeywords(pageStructure, taskDescription);
-  }
-
-  const apiKey = settings?.apiKey || DEFAULT_API_KEY;
-  const backendUrl = settings?.backendUrl;
-  
-  const tokenResult = await chrome.storage.local.get(['authToken']);
-  const authToken = tokenResult.authToken;
-  
-  if (!backendUrl && !apiKey) {
-    console.warn('[Elements] No API key configured');
-    return { selectorsToBlock: [], hasRelatedContent: false, reason: 'no-api-key' };
-  }
+  const backendUrl = await getBackendUrl();
+  const aiEnabled = settings.aiFeaturesEnabled !== false && !!backendUrl;
   
   try {
     const isYouTube = pageStructure.isYouTube || false;
@@ -1401,58 +1876,24 @@ Instructions:
 Respond with ONLY valid JSON, no other text.`;
     }
     
-    let response;
+    const responseText = await callRenderLLM(prompt);
     
-    if (backendUrl && authToken) {
-      response = await makeRateLimitedApiCall(() => 
-        fetch(backendUrl + '/api/analyze-page', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`
-          },
-          body: JSON.stringify({ prompt })
-        })
-      );
-    } else {
-      let apiUrl = settings?.apiUrl || CURRENT_MODEL_URL;
-      
-      if (apiUrl.includes('gemini-pro') || apiUrl.includes('gemini-1.5') || apiUrl.includes('gemini-2') || apiUrl.includes('gemini-3')) {
-        apiUrl = CURRENT_MODEL_URL;
-      }
-      
-      console.log('[Elements] Calling Gemini API for element analysis');
-      response = await makeRateLimitedApiCall(() =>
-        fetch(`${apiUrl}?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.3, maxOutputTokens: 500 }
-          })
-        })
-      );
-    }
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API error: ${response.status} - ${errorText}`);
-    }
-    
-    const data = await response.json();
-    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || data.text || '';
-    
-    console.log('[Elements] Gemini response:', responseText.substring(0, 300));
-    console.log('[Elements] ✅ Using Gemini AI for element analysis');
+    console.log('[Elements] Model response:', responseText.substring(0, 300));
+    console.log('[Elements] ✅ Using backend LLM for element analysis');
     
     // Parse JSON response
     let result;
     try {
-      const jsonMatch = responseText.match(/\{.*\}/s);
+      // Robust JSON parsing: strip code fences/backticks
+      const cleaned = responseText
+        .replace(/```json/gi, '')
+        .replace(/```/g, '')
+        .trim();
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         result = JSON.parse(jsonMatch[0]);
       } else {
-        result = JSON.parse(responseText);
+        result = JSON.parse(cleaned);
       }
     } catch (e) {
       console.error('[Elements] Failed to parse response, using keyword fallback');
@@ -1465,11 +1906,12 @@ Respond with ONLY valid JSON, no other text.`;
       selectorsToKeep: result.keep || [],
       hasRelatedContent: result.hasRelatedContent !== false, // Default to true if not specified
       reason: 'ai-analyzed',
-      score: result.hasRelatedContent ? 80 : 20
+      score: result.hasRelatedContent ? 80 : 20,
+      totalElements: pageStructure?.elements?.length || undefined
     };
     
   } catch (error) {
-    console.error('[Elements] Gemini API error:', error);
+    console.error('[Elements] LLM error:', error);
     // Fallback to keyword matching
     return analyzeElementsWithKeywords(pageStructure, taskDescription);
   }
@@ -1486,6 +1928,7 @@ function analyzeElementsWithKeywords(pageStructure, taskDescription) {
   
   const selectorsToBlock = [];
   let hasRelatedContent = false;
+  const totalElements = pageStructure.elements.length;
   
   pageStructure.elements.forEach((el, idx) => {
     const text = (el.videoTitle || el.heading || el.text || '').toLowerCase();
@@ -1505,26 +1948,111 @@ function analyzeElementsWithKeywords(pageStructure, taskDescription) {
     selectorsToBlock,
     hasRelatedContent,
     reason: 'keyword-fallback',
-    score: hasRelatedContent ? 60 : 10
+    score: hasRelatedContent ? 60 : 10,
+    totalElements,
+    blockedCount: selectorsToBlock.length
   };
 }
 
-// Analyze page content with Gemini (simpler scoring approach)
+// Analyze page content with backend LLM (simpler scoring approach)
 async function analyzePageContent(pageContent, taskDescription) {
   const settings = await getSettings();
-  if (!settings.aiFeaturesEnabled) {
+  const aiEnabledRaw = (settings?.backendUrl ? true : (settings.aiFeaturesEnabled !== false));
+  const aiEnabled = DEBUG_FORCE_AI ? true : aiEnabledRaw;
+  if (!aiEnabled) {
     return { shouldBlock: false, reason: 'ai-disabled', score: 60 };
   }
-  const apiKey = settings?.apiKey || DEFAULT_API_KEY;
   const backendUrl = settings?.backendUrl;
+  console.log('[Analyze] Full-page AI check', {
+    aiEnabled,
+    aiEnabledRaw,
+    backendUrl: backendUrl || 'missing'
+  });
+  let usedEndpoint = null;
   
-  // Get auth token for backend auth if available
-  const tokenResult = await chrome.storage.local.get(['authToken']);
-  const authToken = tokenResult.authToken;
+  // Try backend /api/analyze first
+  let aiResult = null;
+  if (backendUrl) {
+    try {
+      const target = `${backendUrl.replace(/\/$/, '')}/api/analyze`;
+      const r = await fetch(target, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: pageContent.url,
+          task: taskDescription,
+          title: pageContent.title,
+          text: pageContent.text.substring(0, 4000)
+        })
+      });
+      const bodyText = await r.text();
+      if (!r.ok) {
+        console.warn('[Analyze] Backend analyze failed', r.status, bodyText.substring(0, 500));
+      } else {
+        try {
+          const data = JSON.parse(bodyText);
+          if (data && typeof data.shouldBlock === 'boolean') {
+            aiResult = {
+              shouldBlock: data.shouldBlock,
+              reason: data.reason || 'backend',
+              score: data.score ?? (data.shouldBlock ? 10 : 80),
+              selectorsToBlock: data.selectorsToBlock || []
+            };
+            usedEndpoint = '/api/analyze';
+          }
+        } catch (e) {
+          console.warn('[Analyze] Backend analyze parse error', e?.message || e);
+        }
+      }
+    } catch (err) {
+      console.warn('[Analyze] Backend analyze error', err?.message || err);
+    }
+  }
   
-  if (!backendUrl && !apiKey) {
-    console.warn('No API key or Backend URL configured');
-    return { shouldBlock: false, reason: 'no-api-key', score: 50 };
+  // Fallback to /api/chat (LLM) if backend analyze not usable
+  if (!aiResult && backendUrl) {
+    try {
+      const prompt = `You are a focus assistant. Analyze if a webpage is relevant to the user's study goal.
+
+User's Study Goal: "${taskDescription}"
+
+Page Information:
+- URL: ${pageContent.url}
+- Title: ${pageContent.title}
+- Content Preview: ${pageContent.text.substring(0, 1000)}...
+
+Respond ONLY with JSON: {"action": "allow|block", "score": 0-100, "reason": "<short>"}`
+;
+      const responseText = await callRenderLLM(prompt);
+      console.log('[Analyze] /api/chat fallback used. Raw len:', responseText?.length || 0);
+      let parsed;
+      try {
+        const cleaned = responseText
+          .replace(/```json/gi, '')
+          .replace(/```/g, '')
+          .trim();
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(cleaned);
+      } catch (e) {
+        parsed = null;
+      }
+      if (parsed && typeof parsed.action === 'string') {
+        aiResult = {
+          shouldBlock: parsed.action === 'block',
+          score: parsed.score || (parsed.action === 'block' ? 10 : 80),
+          reason: parsed.reason || 'backend-llm',
+          selectorsToBlock: []
+        };
+        usedEndpoint = '/api/chat';
+      }
+    } catch (e) {
+      console.warn('[Analyze] LLM chat fallback failed', e?.message || e);
+    }
+  }
+  
+  if (aiResult) {
+    console.log('[Analyze] Full-page AI result source:', usedEndpoint || 'unknown');
+    return aiResult;
   }
   
   try {
@@ -1546,69 +2074,19 @@ Instructions:
 
 Respond with ONLY valid JSON, no other text.`;
 
-    let response;
+    const responseText = await callRenderLLM(prompt);
     
-    if (backendUrl && authToken) {
-      // Use Backend Proxy with rate limiting
-      response = await makeRateLimitedApiCall(() => 
-        fetch(backendUrl + '/api/analyze-page', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`
-          },
-          body: JSON.stringify({ prompt })
-        })
-      );
-    } else {
-      // Direct API Call with rate limiting
-      let apiUrl = settings?.apiUrl || CURRENT_MODEL_URL;
-      
-      if (apiUrl.includes('gemini-pro') || apiUrl.includes('gemini-1.5') || apiUrl.includes('gemini-2') || apiUrl.includes('gemini-3')) {
-        apiUrl = CURRENT_MODEL_URL;
-      }
-      
-      console.log('[API] Calling Gemini API (rate-limited):', apiUrl);
-      console.log('[API] API Key present:', !!apiKey, 'Length:', apiKey?.length);
-      console.log('[API] Prompt length:', prompt.length);
-      
-      response = await makeRateLimitedApiCall(() =>
-        fetch(`${apiUrl}?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.3, maxOutputTokens: 200 }
-          })
-        })
-      );
-      
-      console.log('[API] Response status:', response.status, response.statusText);
-    }
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[API] Response not OK:', response.status, errorText);
-      throw new Error(`API error: ${response.status} - ${errorText}`);
-    }
-    
-    const data = await response.json();
-    console.log('[API] Response data received:', Object.keys(data));
-    console.log('[API] ✅ Using Gemini AI (not keyword fallback)');
-    
-    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || data.text || '';
-    
-    console.log('[API] Gemini response:', responseText.substring(0, 200));
+    console.log('[API] Model response (backend LLM):', responseText.substring(0, 200));
     
     // Parse JSON response
     let result;
     try {
-      const jsonMatch = responseText.match(/\{.*\}/s);
-      if (jsonMatch) {
-        result = JSON.parse(jsonMatch[0]);
-      } else {
-        result = JSON.parse(responseText);
-      }
+      const cleaned = responseText
+        .replace(/```json/gi, '')
+        .replace(/```/g, '')
+        .trim();
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      result = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(cleaned);
     } catch (e) {
       console.error('Failed to parse response, using fallback');
       // Fallback: check if page text contains task keywords
@@ -1632,11 +2110,11 @@ Respond with ONLY valid JSON, no other text.`;
     };
     
   } catch (error) {
-    console.error('[Analyze] Gemini API error:', error);
+    console.error('[Analyze] LLM error:', error);
     console.error('[Analyze] Error message:', error.message);
     
     // Use keyword-based fallback for ALL errors (not just 429)
-    console.log('[Analyze] ⚠️ Using KEYWORD FALLBACK (Gemini API unavailable)');
+    console.log('[Analyze] ⚠️ Using KEYWORD FALLBACK (LLM unavailable)');
     console.log('[Analyze] This means blocking decisions are based on keyword matching, not AI analysis');
     
     // Keyword-based relevance check
@@ -1656,9 +2134,14 @@ Respond with ONLY valid JSON, no other text.`;
     console.log('[Analyze] Hostname:', hostname);
     
     // Check for common distracting sites (always block these unless task matches)
-    const distractingSites = ['youtube.com', 'facebook.com', 'instagram.com', 'twitter.com', 
-                              'tiktok.com', 'reddit.com', 'netflix.com', 'hulu.com', 
-                              'disneyplus.com', 'primevideo.com', 'spotify.com'];
+    const distractingSites = [
+      'youtube.com', 'facebook.com', 'instagram.com', 'twitter.com',
+      'tiktok.com', 'reddit.com', 'netflix.com', 'hulu.com',
+      'disneyplus.com', 'primevideo.com', 'spotify.com',
+      // shopping / hardware-heavy sites
+      'amazon.', 'bestbuy.', 'newegg.', 'microcenter.', 'bhphotovideo.',
+      'walmart.', 'target.', 'costco.', 'ebay.', 'pcpartpicker.', 'gearbest.', 'aliexpress.'
+    ];
     const isDistractingSite = distractingSites.some(site => hostname.includes(site));
     
     // Educational/research sites - allow by default unless clearly not relevant
@@ -1690,11 +2173,11 @@ Respond with ONLY valid JSON, no other text.`;
     // - Other sites: block if less than 30% relevance
     let shouldBlock;
     if (isEducationalSite) {
-      // Educational sites are generally allowed - they're learning tools
       shouldBlock = false;
       console.log('[Analyze] Educational site detected - allowing by default');
     } else if (isDistractingSite) {
-      shouldBlock = relevance < 0.5; // Need 50%+ relevance to allow distracting sites
+      // For shopping/hardware/entertainment, require higher relevance
+      shouldBlock = relevance < 0.5;
       console.log('[Analyze] Distracting site detected, relevance threshold: 50%');
     } else {
       shouldBlock = relevance < 0.3; // 30% threshold for other sites
@@ -1737,7 +2220,7 @@ Respond with ONLY valid JSON, no other text.`;
     return {
       shouldBlock,
       score: Math.round(relevance * 100),
-      reason: shouldBlock ? 'keyword-fallback-not-relevant' : 'keyword-fallback-relevant',
+      reason: 'ai-error',
       selectors: []
     };
   }
@@ -2315,62 +2798,9 @@ Instructions:
 Respond with ONLY valid JSON array, no other text. Example: ["#sidebar", ".advertisement", "#trending"]`;
     }
 
-    let response;
+    const responseText = await callRenderLLM(prompt); // backend handles the model/key
     
-    // DECISION: Use Backend Proxy (if configured) OR Direct API
-    if (backendUrl && authToken) {
-      // OPTION 1: Use Backend Proxy with Bearer Token
-      // This allows limiting API use per person
-      response = await fetch(backendUrl + '/api/analyze-page', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}` // Identifying the user
-        },
-        body: JSON.stringify({
-          prompt: prompt
-        })
-      });
-    } else {
-      // OPTION 2: Direct API Call (current method)
-      // Uses the shared or user-provided API key
-      let apiUrl = settings?.apiUrl || CURRENT_MODEL_URL;
-      
-      // Fix for cached old model names that no longer exist
-      if (apiUrl.includes('gemini-pro') || apiUrl.includes('gemini-1.5') || apiUrl.includes('gemini-2') || apiUrl.includes('gemini-3')) {
-        console.log('Updating deprecated model URL to current model');
-        apiUrl = CURRENT_MODEL_URL;
-      }
-      
-      console.log('Calling Gemini API:', apiUrl);
-      response = await fetch(`${apiUrl}?key=${apiKey}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: prompt
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 500
-        }
-      })
-    });
-    }
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API error: ${response.status} - ${errorText}`);
-    }
-    
-    const data = await response.json();
-    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || data.text || ''; // backend might return { text: ... }
-    
-    console.log('Gemini API response text:', responseText.substring(0, 200));
+    console.log('LLM response text:', responseText.substring(0, 200));
     
     // Parse JSON response
     let selectorsToBlock = [];
@@ -2385,10 +2815,10 @@ Respond with ONLY valid JSON array, no other text. Example: ["#sidebar", ".adver
         selectorsToBlock = JSON.parse(responseText);
         console.log('Parsed selectors from full response:', selectorsToBlock.length);
       }
-    } catch (e) {
-      console.error('Failed to parse Gemini response:', e);
-      console.error('Response text was:', responseText);
-      // Fallback: use heuristics
+  } catch (e) {
+    console.error('Failed to parse LLM response:', e);
+    console.error('Response text was:', responseText);
+    // Fallback: use heuristics
       selectorsToBlock = pageStructure.elements
         .filter(el => el.isLikelyDistraction && !el.isMainContent)
         .map(el => el.selector)
@@ -2630,18 +3060,17 @@ async function autoNavigateToSearch(tabId, url, domain) {
 async function showSearchChoicePrompt(tabId, searchQuery) {
   return new Promise((resolve) => {
     // Send message to content script to show prompt
-    chrome.tabs.sendMessage(tabId, {
+    sendMessageWithInjection(tabId, {
       action: 'showSearchChoice',
       mainTopic: searchQuery.main,
       subtopic: searchQuery.subtopic
-    }, (response) => {
+    }).then((response) => {
       if (response && response.choice) {
         resolve(response.choice);
       } else {
-        // Default to main topic if no response
         resolve('main');
       }
-    });
+    }).catch(() => resolve('main'));
   });
 }
 
@@ -2652,7 +3081,7 @@ async function getSettings() {
     dataVersion: 1,
     alwaysAllow: [],
     alwaysBlock: [],
-    apiKey: '',
+    apiKey: DEFAULT_API_KEY,
     apiUrl: CURRENT_MODEL_URL,
     schedule: null,
     backendUrl: 'https://focufy-extension-1.onrender.com', // Pre-configured backend URL
@@ -2672,6 +3101,7 @@ async function getSettings() {
     energyModeEnabled: false,
     dataRetentionEnabled: false,
     dataRetentionDays: 90,
+    posthogEnabled: false,
     passiveCoachThreshold: 40,
     pauseTaxDelaySeconds: 5,
     contextualRules: [],
@@ -2684,12 +3114,33 @@ async function getSettings() {
   };
 
   const result = await readSettingsRaw();
-  const merged = { ...defaultSettings, ...(result.settings || {}) };
+  let merged = { ...defaultSettings, ...(result.settings || {}) };
+
+  // If we have a user email, try to pull settings from Supabase
+  try {
+    const email = await getUserEmail();
+    if (email) {
+      const remote = await supabaseLoadSettings(email);
+      if (remote) {
+        merged = { ...defaultSettings, ...remote };
+        console.log('[Settings] Loaded from Supabase for', email);
+      }
+    }
+  } catch (e) {
+    console.warn('[Settings] Supabase load failed:', e?.message || e);
+  }
 
   // Ensure boolean flags are initialized to sensible defaults
-  ['aiFeaturesEnabled','autoNavigateEnabled','learningModeEnabled','focusCoachEnabled','goalDecompositionEnabled','focusQualityEnabled','contextualBlockingEnabled','sessionReflectionEnabled','passiveCoachEnabled','narrativeAnalyticsEnabled','personalContractsEnabled','pauseTaxEnabled','learningFeedEnabled','energyModeEnabled','dataRetentionEnabled'].forEach(key => {
+  ['aiFeaturesEnabled','autoNavigateEnabled','learningModeEnabled','focusCoachEnabled','goalDecompositionEnabled','focusQualityEnabled','contextualBlockingEnabled','sessionReflectionEnabled','passiveCoachEnabled','narrativeAnalyticsEnabled','personalContractsEnabled','pauseTaxEnabled','learningFeedEnabled','energyModeEnabled','dataRetentionEnabled','posthogEnabled'].forEach(key => {
     if (typeof merged[key] !== 'boolean') merged[key] = defaultSettings[key];
   });
+
+  // Ensure API key is present (hardcoded fallback) and AI is on by default for direct calls
+  if (!merged.apiKey) {
+    merged.apiKey = DEFAULT_API_KEY;
+  }
+  merged.aiFeaturesEnabled = merged.aiFeaturesEnabled !== false;
+  merged.apiUrl = CURRENT_MODEL_URL;
 
   // Persist defaults if we had to fill them in
   const shouldPersist = !result.settings ||
@@ -2738,7 +3189,11 @@ URL: ${pageUrl}
 Learning mode summary:
 ${learningSummary}
 
-Use the page and learning context to answer the user. If they ask for a quiz or practice, give 2-3 short, self-contained questions with brief answers or hints. Keep replies tight and actionable. If context is thin, acknowledge and give a best-effort answer. Avoid fabricating details not supported by the provided text.
+Rules:
+- Ground every answer in the provided page/selection/learning context. Do NOT invent facts.
+- If the context is missing or does not mention the topic, say you don't have enough info and ask for a short summary.
+- For quizzes, ask ONE question at a time. Keep questions short; include an answer/hint only after the user replies (or provide it only if they explicitly ask).
+- Keep replies tight and actionable (1-3 sentences). No code fences or JSON.
 
 Context to use:
 ${contextText}
@@ -2765,59 +3220,14 @@ Return STRICT JSON: {"question":"...","answer":"...","explanation":"..."}
 }
 
 async function generateQuizQuestion(tabId) {
-  const settings = await getSettings();
-  const apiKey = settings?.apiKey || DEFAULT_API_KEY;
-  const backendUrl = settings?.backendUrl;
-  const tokenResult = await chrome.storage.local.get(['authToken']);
-  const authToken = tokenResult.authToken;
-
   let pageContent = null;
   if (tabId) {
     try { pageContent = await extractPageContent(tabId); } catch (e) {}
   }
   const prompt = await buildQuizPrompt(pageContent);
 
-  if (!backendUrl && !apiKey) {
-    return { question: 'What is your current study goal?', answer: (currentSession?.taskDescription || '').toLowerCase(), explanation: 'We want to confirm you remember your focus.' };
-  }
-
   try {
-    let response;
-    if (backendUrl && authToken) {
-      response = await makeRateLimitedApiCall(() =>
-        fetch(backendUrl + '/api/analyze-page', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`
-          },
-          body: JSON.stringify({ prompt })
-        })
-      );
-    } else {
-      let apiUrl = settings?.apiUrl || CURRENT_MODEL_URL;
-      if (apiUrl.includes('gemini-pro') || apiUrl.includes('gemini-1.5') || apiUrl.includes('gemini-2') || apiUrl.includes('gemini-3')) {
-        apiUrl = CURRENT_MODEL_URL;
-      }
-      response = await makeRateLimitedApiCall(() =>
-        fetch(`${apiUrl}?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.3, maxOutputTokens: 200 }
-          })
-        })
-      );
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Quiz API error: ${response.status} - ${errorText}`);
-    }
-
-    const data = await response.json();
-    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || data.text || '';
+    const responseText = await callRenderLLM(prompt);
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]);
@@ -2846,35 +3256,22 @@ async function maybeTriggerPassiveCoach(tabId, url) {
   let summary = 'Stay on target for your goal.';
   let quiz = { question: 'What are you focusing on?', answer: currentSession?.taskDescription || '' };
 
-  if (settings.aiFeaturesEnabled && settings.apiKey) {
+  if (settings.aiFeaturesEnabled) {
     try {
       const content = await extractPageContent(tabId);
       const prompt = `Summarize this page in 2 sentences and provide one short quiz question relevant to "${currentSession.taskDescription}". Format: Summary: ... Quiz: ... Answer: ...`;
-      const resp = await makeRateLimitedApiCall(() =>
-        fetch((settings.apiUrl || CURRENT_MODEL_URL) + `?key=${settings.apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: `${prompt}\n\n${content?.text?.slice(0, 1200) || ''}` }] }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 200 }
-          })
-        })
-      );
-      if (resp.ok) {
-        const data = await resp.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        const sumMatch = text.match(/Summary:\s*(.*)/i);
-        const quizMatch = text.match(/Quiz:\s*(.*)/i);
-        const ansMatch = text.match(/Answer:\s*(.*)/i);
-        summary = sumMatch ? sumMatch[1].trim() : text.slice(0, 200);
-        quiz = { question: quizMatch ? quizMatch[1].trim() : quiz.question, answer: ansMatch ? ansMatch[1].trim() : quiz.answer };
-      }
+      const text = await callRenderLLM(`${prompt}\n\n${content?.text?.slice(0, 1200) || ''}`);
+      const sumMatch = text.match(/Summary:\s*(.*)/i);
+      const quizMatch = text.match(/Quiz:\s*(.*)/i);
+      const ansMatch = text.match(/Answer:\s*(.*)/i);
+      summary = sumMatch ? sumMatch[1].trim() : text.slice(0, 200);
+      quiz = { question: quizMatch ? quizMatch[1].trim() : quiz.question, answer: ansMatch ? ansMatch[1].trim() : quiz.answer };
     } catch (e) {
       console.warn('[PassiveCoach] fallback summary:', e);
     }
   }
 
-  chrome.tabs.sendMessage(tabId, {
+  sendMessageWithInjection(tabId, {
     action: 'showPassiveCoach',
     summary,
     quiz
@@ -2890,48 +3287,12 @@ async function decomposeGoal(goal) {
   if (!settings.aiFeaturesEnabled) {
     return simpleSubgoals(goal);
   }
-  const apiKey = settings?.apiKey || DEFAULT_API_KEY;
-  const backendUrl = settings?.backendUrl;
-  const tokenResult = await chrome.storage.local.get(['authToken']);
-  const authToken = tokenResult.authToken;
   const prompt = `Break this study goal into 3-5 short, actionable checkpoints. Respond ONLY with a numbered list.
 
 Goal: "${goal}"`;
 
   try {
-    if (!backendUrl && !apiKey) {
-      return simpleSubgoals(goal);
-    }
-    let response;
-    if (backendUrl && authToken) {
-      response = await makeRateLimitedApiCall(() =>
-        fetch(backendUrl + '/api/analyze-page', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`
-          },
-          body: JSON.stringify({ prompt })
-        })
-      );
-    } else {
-      let apiUrl = settings?.apiUrl || CURRENT_MODEL_URL;
-      response = await makeRateLimitedApiCall(() =>
-        fetch(`${apiUrl}?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 200 }
-          })
-        })
-      );
-    }
-    if (!response.ok) {
-      throw new Error(`Decomposition error: ${response.status}`);
-    }
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || data.text || '';
+    const text = await callRenderLLM(prompt);
     const lines = text.split(/\n+/).map(l => l.replace(/^\d+[\).\s-]*/, '').trim()).filter(Boolean);
     return lines.map(t => ({ text: t, done: false }));
   } catch (e) {
@@ -2968,10 +3329,7 @@ async function pruneOldData() {
 // Chatbot handler
 async function handleChatbotQuestion({ question, tabId, selectionText, pageUrl }) {
   const settings = await getSettings();
-  const apiKey = settings?.apiKey || DEFAULT_API_KEY;
-  const backendUrl = settings?.backendUrl;
-  const tokenResult = await chrome.storage.local.get(['authToken']);
-  const authToken = tokenResult.authToken;
+  const backendUrl = await getBackendUrl();
 
   if (settings.focusCoachEnabled === false || settings.aiFeaturesEnabled === false) {
     return 'Focus Coach is disabled or AI features are off in Settings.';
@@ -2989,53 +3347,35 @@ async function handleChatbotQuestion({ question, tabId, selectionText, pageUrl }
   
   const prompt = await buildChatbotPrompt(question, pageContent, selectionText, pageUrl);
   
-  if (!backendUrl && !apiKey) {
-    throw new Error('No API key configured for chatbot.');
-  }
-  
   try {
-    let response;
-    if (backendUrl && authToken) {
-      response = await makeRateLimitedApiCall(() =>
-        fetch(backendUrl + '/api/analyze-page', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`
-          },
-          body: JSON.stringify({ prompt })
-        })
-      );
-    } else {
-      let apiUrl = settings?.apiUrl || CURRENT_MODEL_URL;
-      if (apiUrl.includes('gemini-pro') || apiUrl.includes('gemini-1.5') || apiUrl.includes('gemini-2') || apiUrl.includes('gemini-3')) {
-        apiUrl = CURRENT_MODEL_URL;
+    const responseText = await callRenderLLM(prompt);
+    const trimmed = responseText.trim() || 'I could not generate a response. Please try again.';
+    try {
+      const email = await getUserEmail();
+      if (email && currentSession?.sessionId) {
+        await supabaseAddChatMessage(email, currentSession.sessionId, {
+          role: 'user',
+          content: question,
+          selectionText: selectionText || '',
+          pageUrl
+        });
+        await supabaseAddChatMessage(email, currentSession.sessionId, {
+          role: 'assistant',
+          content: trimmed
+        });
       }
-      response = await makeRateLimitedApiCall(() =>
-        fetch(`${apiUrl}?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.35, maxOutputTokens: 600 }
-          })
-        })
-      );
+    } catch (e) {
+      console.warn('[Chatbot] Failed to persist chat message:', e?.message || e);
     }
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      if (response.status === 401 || response.status === 403) {
-        return 'Authentication failed. Please sign in and ensure your API key is valid in Settings.';
-      }
-      throw new Error(`Chatbot API error: ${response.status} - ${errorText}`);
-    }
-    
-    const data = await response.json();
-    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || data.text || '';
-    return responseText.trim() || 'I could not generate a response. Please try again.';
+    return trimmed;
   } catch (error) {
     console.error('[Chatbot] Error answering question:', error);
+    capturePosthogEvent('model_error', {
+      source: 'chatbot',
+      message: (error?.message || 'unknown').slice(0, 120),
+      hasAuthToken: !!authToken,
+      usedBackend: !!backendUrl
+    });
     return 'I hit an issue reaching the model. Please try again in a moment or check your API key in Settings.';
   }
 }
@@ -3077,6 +3417,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     startSession(request.taskDescription, request.durationMinutes, request.subgoals || [], request.energyTag || null)
       .then(() => sendResponse({ success: true }))
       .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+  
+  if (request.action === 'posthogCapture') {
+    (async () => {
+      await capturePosthogEvent(request.event || 'custom', request.properties || {});
+      sendResponse({ success: true });
+    })();
     return true;
   }
   
@@ -3281,7 +3629,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'testBlock') {
     // Test action to force block current tab
     if (sender.tab?.id) {
-      chrome.tabs.sendMessage(sender.tab.id, {
+      sendMessageWithInjection(sender.tab.id, {
         action: 'blockPage',
         reason: 'test',
         score: 0

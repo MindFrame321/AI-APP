@@ -4,28 +4,42 @@
   box-sizing: border-box;
 }
 
+:root {
+  --bg: #0b0f12;
+  --panel: rgba(255, 255, 255, 0.05);
+  --border: rgba(255, 255, 255, 0.08);
+  --accent: #00e28b;
+  --text-strong: #f9fbff;
+  --text-muted: #9ca3af;
+  --button-bg: #ffffff;
+  --button-text: #0b0f12;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+}
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background: #f5f5f5;
+  font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+  background: var(--bg);
   padding: 20px;
-  color: #1a1a1a;
+  color: var(--text-strong);
 }
 
 .container {
   max-width: 1000px;
   margin: 0 auto;
-  background: white;
+  background: var(--panel);
   border-radius: 12px;
   padding: 32px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
 }
 
 header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(0, 226, 139, 0.12));
   margin: -32px -32px 32px -32px;
   padding: 32px;
-  color: white;
+  color: var(--text-strong);
   border-radius: 12px 12px 0 0;
+  border-bottom: 1px solid var(--border);
 }
 
 .header-content {
@@ -46,14 +60,14 @@ header {
 
 header h1 {
   font-size: 28px;
-  color: white;
+  color: var(--text-strong);
   margin-bottom: 4px;
 }
 
 .header-subtitle {
   font-size: 14px;
   opacity: 0.9;
-  color: white;
+  color: var(--text-muted);
 }
 
 .help-content {
@@ -66,16 +80,16 @@ header h1 {
 .faq-section h2,
 .quick-links h2 {
   font-size: 20px;
-  color: #1e293b;
+  color: var(--text-strong);
   margin-bottom: 16px;
   font-weight: 600;
 }
 
 .chat-container {
-  border: 2px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 20px;
-  background: #f8fafc;
+  background: var(--panel);
 }
 
 .chat-messages {
@@ -84,11 +98,12 @@ header h1 {
   overflow-y: auto;
   margin-bottom: 16px;
   padding: 16px;
-  background: white;
+  background: rgba(255, 255, 255, 0.03);
   border-radius: 8px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  border: 1px solid var(--border);
 }
 
 .message {
@@ -98,15 +113,15 @@ header h1 {
 }
 
 .message.user {
-  background: #667eea;
-  color: white;
+  background: var(--accent);
+  color: #0b0f12;
   align-self: flex-end;
   margin-left: auto;
 }
 
 .message.bot {
-  background: #f1f5f9;
-  color: #1e293b;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-strong);
   align-self: flex-start;
 }
 
@@ -118,36 +133,39 @@ header h1 {
 .chat-input {
   flex: 1;
   padding: 12px;
-  border: 2px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 14px;
   font-family: inherit;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-strong);
 }
 
 .chat-input:focus {
   outline: none;
-  border-color: #667eea;
+  border-color: var(--accent);
 }
 
 .btn-send {
   padding: 12px 24px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
+  background: var(--button-bg);
+  color: var(--button-text);
+  border: 1px solid transparent;
   border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+  box-shadow: var(--shadow);
 }
 
 .btn-send:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 16px 40px rgba(255, 255, 255, 0.1);
 }
 
 .chat-note {
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-muted);
   margin-top: 8px;
   text-align: center;
 }
@@ -159,21 +177,21 @@ header h1 {
 }
 
 .faq-item {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 20px;
-  background: #f8fafc;
+  background: var(--panel);
 }
 
 .faq-question {
   font-weight: 600;
-  color: #1e293b;
+  color: var(--text-strong);
   margin-bottom: 8px;
   font-size: 16px;
 }
 
 .faq-answer {
-  color: #64748b;
+  color: var(--text-muted);
   line-height: 1.6;
   font-size: 14px;
 }
@@ -189,17 +207,17 @@ header h1 {
   align-items: center;
   gap: 12px;
   padding: 16px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 8px;
   text-decoration: none;
-  color: #1e293b;
+  color: var(--text-strong);
   transition: all 0.2s;
 }
 
 .link-card:hover {
-  background: #f1f5f9;
-  border-color: #667eea;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--accent);
   transform: translateY(-2px);
 }
 
@@ -212,7 +230,7 @@ header h1 {
   display: flex;
   gap: 8px;
   margin-bottom: 24px;
-  border-bottom: 2px solid #e2e8f0;
+  border-bottom: 2px solid var(--border);
 }
 
 .tab-btn {
@@ -220,7 +238,7 @@ header h1 {
   background: transparent;
   border: none;
   border-bottom: 3px solid transparent;
-  color: #64748b;
+  color: var(--text-muted);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -229,12 +247,12 @@ header h1 {
 }
 
 .tab-btn:hover {
-  color: #667eea;
+  color: var(--accent);
 }
 
 .tab-btn.active {
-  color: #667eea;
-  border-bottom-color: #667eea;
+  color: var(--accent);
+  border-bottom-color: var(--accent);
 }
 
 .tab-content {
@@ -248,9 +266,9 @@ header h1 {
 /* Ticket Form */
 .ticket-section {
   padding: 24px;
-  background: #f8fafc;
+  background: var(--panel);
   border-radius: 12px;
-  border: 2px solid #e2e8f0;
+  border: 1px solid var(--border);
 }
 
 .ticket-form {
@@ -267,22 +285,24 @@ header h1 {
 
 .form-group label {
   font-weight: 600;
-  color: #1e293b;
+  color: var(--text-strong);
   font-size: 14px;
 }
 
 .form-input {
   padding: 12px;
-  border: 2px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 14px;
   font-family: inherit;
   transition: border-color 0.2s;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-strong);
 }
 
 .form-input:focus {
   outline: none;
-  border-color: #667eea;
+  border-color: var(--accent);
 }
 
 .form-input select {
@@ -291,27 +311,29 @@ header h1 {
 
 .btn-primary {
   padding: 12px 24px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
+  background: var(--button-bg);
+  color: var(--button-text);
+  border: 1px solid transparent;
   border-radius: 8px;
   font-weight: 600;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s;
   align-self: flex-start;
+  box-shadow: var(--shadow);
 }
 
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 16px 40px rgba(255, 255, 255, 0.1);
+  color: var(--button-text);
 }
 
 .btn-secondary {
   padding: 8px 16px;
-  background: #f1f5f9;
-  color: #1e293b;
-  border: 2px solid #e2e8f0;
+  background: transparent;
+  color: var(--text-strong);
+  border: 1px solid var(--border);
   border-radius: 8px;
   font-weight: 600;
   font-size: 12px;
@@ -320,8 +342,8 @@ header h1 {
 }
 
 .btn-secondary:hover {
-  background: #e2e8f0;
-  border-color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--accent);
   transform: translateY(-1px);
 }
 
@@ -330,32 +352,35 @@ header h1 {
   padding: 12px 16px;
   border-radius: 8px;
   font-size: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text-strong);
 }
 
 .ticket-status.success {
-  background: #d1fae5;
-  color: #065f46;
-  border: 1px solid #6ee7b7;
+  background: rgba(0, 226, 139, 0.1);
+  color: var(--text-strong);
+  border: 1px solid rgba(0, 226, 139, 0.5);
 }
 
 .ticket-status.error {
-  background: #fee2e2;
-  color: #991b1b;
-  border: 1px solid #fca5a5;
+  background: rgba(239, 68, 68, 0.1);
+  color: #fecdd3;
+  border: 1px solid rgba(239, 68, 68, 0.5);
 }
 
 .ticket-status.loading {
-  background: #dbeafe;
-  color: #1e40af;
-  border: 1px solid #93c5fd;
+  background: rgba(59, 130, 246, 0.1);
+  color: #bfdbfe;
+  border: 1px solid rgba(59, 130, 246, 0.5);
 }
 
 /* Tickets List */
 .tickets-section {
   padding: 24px;
-  background: #f8fafc;
+  background: var(--panel);
   border-radius: 12px;
-  border: 2px solid #e2e8f0;
+  border: 1px solid var(--border);
 }
 
 .tickets-list {
@@ -365,16 +390,16 @@ header h1 {
 }
 
 .ticket-card {
-  background: white;
-  border: 1px solid #e2e8f0;
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 20px;
   transition: all 0.2s;
 }
 
 .ticket-card:hover {
-  border-color: #667eea;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
+  border-color: var(--accent);
+  box-shadow: 0 2px 8px rgba(0, 226, 139, 0.15);
 }
 
 .ticket-header {
@@ -387,7 +412,7 @@ header h1 {
 .ticket-id {
   font-family: monospace;
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-muted);
   font-weight: 600;
 }
 
@@ -679,4 +704,3 @@ header h1 {
   font-size: 14px;
   margin: 0;
 }
-
