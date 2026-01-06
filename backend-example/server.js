@@ -2,6 +2,7 @@
 const express = require('express');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 console.log('BOOT_MARKER_2026_01_06 :: backend-example/server.js is running');
+console.log('MODEL_LOCKED_TO=mistralai/devstral-2512:free');
 
 const app = express();
 app.use(express.json());
@@ -35,6 +36,14 @@ app.get('/healthz', (req, res) => {
   res.json({ ok: true });
 });
 
+// Debug model endpoint
+app.get('/debug/model', (req, res) => {
+  res.json({
+    model: 'mistralai/devstral-2512:free',
+    hasOpenRouterKey: Boolean(process.env.OPENROUTER_API_KEY)
+  });
+});
+
 // Simple GET hint for chat
 app.get('/api/chat', (req, res) => {
   res.json({ ok: true, hint: 'Use POST /api/chat with { prompt }' });
@@ -48,13 +57,15 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'prompt required' });
     }
 
+    const MODEL = 'mistralai/devstral-2512:free';
     const apiKey = process.env.OPENROUTER_API_KEY;
     console.log('[/api/chat] hit. OPENROUTER_API_KEY present:', Boolean(apiKey));
+    console.log('[/api/chat] prompt length:', prompt.length);
+    console.log('[/api/chat] using model:', MODEL);
     if (!apiKey) {
       return res.status(500).json({ error: 'OPENROUTER_API_KEY is not set on the server' });
     }
 
-    console.log('[/api/chat] calling OpenRouter...');
     const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -64,7 +75,7 @@ app.post('/api/chat', async (req, res) => {
         'X-Title': 'Focufy Extension'
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.0-flash-exp:free',
+        model: MODEL,
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -72,7 +83,7 @@ app.post('/api/chat', async (req, res) => {
     const text = await r.text();
     if (!r.ok) {
       console.error('[OpenRouter] error status:', r.status, 'body:', text);
-      return res.status(r.status).json({ error: text || 'OpenRouter error' });
+      return res.status(r.status).json({ error: text || 'OpenRouter error', status: r.status, model: MODEL });
     }
 
     let data;
@@ -80,7 +91,7 @@ app.post('/api/chat', async (req, res) => {
       data = JSON.parse(text);
     } catch (e) {
       console.error('[OpenRouter] failed to parse JSON:', text);
-      return res.status(500).json({ error: 'Invalid JSON from OpenRouter' });
+      return res.status(500).json({ error: 'Invalid JSON from OpenRouter', status: 500, model: MODEL });
     }
 
     const content = data?.choices?.[0]?.message?.content;
