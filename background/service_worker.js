@@ -175,7 +175,7 @@ function extractModelText(data) {
 }
 
 // Backend defaults
-const DEFAULT_BACKEND_URL = 'https://focufy-extension-1.onrender.com';
+const DEFAULT_BACKEND_URL = ''; // disable backend; use Gemini directly
 const DEFAULT_BACKEND_SECRET = '';
 
 // Debug flags
@@ -183,15 +183,13 @@ const DEBUG_FORCE_AI = true; // force AI on regardless of stored setting
 const DEBUG_BYPASS_CACHE = true; // ignore cached analyses
 
 // Current supported model (OpenRouter)
-const CURRENT_MODEL_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const CURRENT_MODEL_NAME = 'nvidia/nemotron-3-nano-30b-a3b:free';
-// Hardcoded key for OpenRouter (use backend when possible)
-const DEFAULT_API_KEY = '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';
+const CURRENT_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const CURRENT_MODEL_NAME = 'gemini-2.0-flash';
+// Hardcoded Gemini key (can be overridden in settings.apiKey/geminiApiKey)
+const DEFAULT_API_KEY = 'AIzaSyCLgCcyLJqDSFnzvpVlwxo9DaMaFeGpcVo';
 
 async function getBackendUrl() {
-  const { backendUrl: flatBackend } = await chrome.storage.sync.get(['backendUrl']);
-  const { settings } = await chrome.storage.sync.get(['settings']);
-  return flatBackend || settings?.backendUrl || DEFAULT_BACKEND_URL;
+  return ''; // disable backend usage for now
 }
 
 async function getBackendSecret() {
@@ -291,17 +289,18 @@ async function ensureContentScriptAndSend(tabId, message) {
 const sendMessageWithInjection = ensureContentScriptAndSend;
 
 async function callRenderLLM(prompt) {
-  const backendUrl = await getBackendUrl();
-  if (!backendUrl) throw new Error('No backendUrl configured for LLM');
-  const url = backendUrl.replace(/\/$/, '') + '/api/chat';
-  console.log('[callRenderLLM] URL:', url);
-  const secret = await getBackendSecret();
-  const headers = { 'Content-Type': 'application/json' };
-  if (secret) headers['x-extension-secret'] = secret;
+  // Direct Gemini call with stored API key
+  const settings = await getSettings();
+  const apiKey = settings.apiKey || settings.geminiApiKey || DEFAULT_API_KEY;
+  if (!apiKey) throw new Error('No GEMINI_API_KEY configured');
+  const url = CURRENT_MODEL_URL;
   const resp = await fetch(url, {
     method: 'POST',
-    headers,
-    body: JSON.stringify({ prompt })
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }]}],
+      generationConfig: { temperature: 0.3, maxOutputTokens: 800 }
+    })
   });
   const text = await resp.text();
   if (!resp.ok) {
@@ -312,7 +311,7 @@ async function callRenderLLM(prompt) {
   }
   let data = {};
   try { data = JSON.parse(text); } catch (e) {}
-  return data.content || text || '';
+  return extractModelText(data) || text || '';
 }
 
 // Supabase helpers
