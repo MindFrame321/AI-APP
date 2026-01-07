@@ -12,6 +12,9 @@ const CACHE_TTL = 60 * 60 * 1000; // 60 minutes (longer cache to reduce API call
 // DeclarativeNetRequest rule IDs - use range 1000-1999 for always-block rules
 const DNR_RULE_ID_START = 1000;
 const DNR_RULE_ID_END = 1999;
+// Adblock rule IDs - use range 2000-2099
+const AD_RULE_ID_START = 2000;
+const AD_RULE_ID_END = 2099;
 
 // Supabase config (publishable key; rely on RLS)
 const SUPABASE_URL = 'https://emwuirfbximtqhqxsdop.supabase.co';
@@ -32,8 +35,7 @@ let sessionMetrics = {
   idleSeconds: 0
 };
 let lastActivityTs = Date.now();
-let inFlightAnalyses = null; // disabled duplicate-analysis guard
-const ANALYSIS_COOLDOWN_MS = 0;
+let inFlightAnalyses = new Set(); // track in-flight analyses per tab+url to avoid duplicate API calls
 
 // Rate limiting
 let apiCallQueue = [];
@@ -481,6 +483,7 @@ async function fetchBackendAnalysis(url, taskDescription) {
   await migrateSettings();
   await loadSessionState();
   await debugApiKeyPresence();
+  try { await applyAdblockRules(); } catch (e) { console.warn('[Adblock] Failed to apply rules:', e?.message || e); }
   
   // Set up webNavigation listeners immediately
   setupWebNavigationListeners();
@@ -962,6 +965,49 @@ async function applyBlockedSites(blockedHostnames) {
   }
 }
 
+// Simple adblock using declarativeNetRequest
+async function applyAdblockRules() {
+  if (!chrome.declarativeNetRequest) return;
+
+  const adHosts = [
+    'doubleclick.net',
+    'googlesyndication.com',
+    'googleadservices.com',
+    'adservice.google.com',
+    'ads.yahoo.com',
+    'ads.pubmatic.com',
+    'amazon-adsystem.com',
+    'adnxs.com',
+    'rubiconproject.com',
+    'criteo.com',
+    'taboola.com',
+    'outbrain.com'
+  ];
+
+  const rules = adHosts.map((host, idx) => ({
+    id: AD_RULE_ID_START + idx,
+    priority: 1,
+    action: { type: 'block' },
+    condition: {
+      urlFilter: host,
+      resourceTypes: ['sub_frame', 'script', 'xmlhttprequest', 'image', 'media', 'other']
+    }
+  }));
+
+  // remove previous adblock rules in the range
+  const existing = await chrome.declarativeNetRequest.getDynamicRules();
+  const removeIds = existing
+    .filter(r => r.id >= AD_RULE_ID_START && r.id <= AD_RULE_ID_END)
+    .map(r => r.id);
+
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: removeIds,
+    addRules: rules
+  });
+
+  console.log('[Adblock] Installed', rules.length, 'adblock rules');
+}
+
 async function handlePauseTax(tabId, targetUrl, reason) {
   const settings = await getSettings();
   if (!settings.pauseTaxEnabled) {
@@ -1276,7 +1322,11 @@ function stopIdleMonitor() {
 // Analyze page and block irrelevant elements - SIMPLIFIED VERSION
 async function analyzeAndBlockPage(tabId, url) {
   const analysisKey = `${tabId}:${url}`;
-  // Duplicate-analysis guard disabled
+  if (inFlightAnalyses.has(analysisKey)) {
+    console.log('[Analyze] Skipping duplicate in-flight analysis for', analysisKey);
+    return;
+  }
+  inFlightAnalyses.add(analysisKey);
 
   const storedSession = await getCurrentSessionFromStorage();
   if (storedSession) {
@@ -1682,7 +1732,7 @@ async function analyzeAndBlockPage(tabId, url) {
   } catch (error) {
     console.error('Error analyzing page:', error);
   } finally {
-    // No in-flight cleanup needed
+    inFlightAnalyses.delete(analysisKey);
   }
 }
 

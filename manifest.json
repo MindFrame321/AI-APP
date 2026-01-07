@@ -30,6 +30,15 @@
     "service_worker": "background/service_worker.js",
     "type": "module"
   },
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "rules_1",
+        "enabled": true,
+        "path": "rules/rules_1.json"
+      }
+    ]
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
