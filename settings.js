@@ -1,6 +1,3 @@
-/**
- * Focufy - Settings Script
- */
 
 let currentSettings = null;
 
@@ -41,7 +38,7 @@ async function checkSessionStatus() {
       const warningEl = document.getElementById('sessionWarning');
       if (warningEl) {
         warningEl.classList.remove('hidden');
-        // Update warning message to be less restrictive
+
         const warningText = warningEl.querySelector('p');
         if (warningText) {
           warningText.textContent = '⚠️ You have an active focus session. Settings are available but changing them may affect your session.';

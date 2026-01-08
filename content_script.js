@@ -1,12 +1,5 @@
 (() => {
 console.log("FOCUFY content_script loaded on", location.href);
-/**
- * Focufy - Content Script
- * 
- * Handles element-level blocking on pages
- * Hides/distorts distracting elements while keeping relevant content visible
- */
-
 if (window.__FOCUFY_CS_LOADED__) {
   console.log('[Focufy] Content script already injected, skipping re-run');
   return;

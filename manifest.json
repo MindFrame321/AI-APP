@@ -50,6 +50,11 @@
       "matches": ["https://www.google.com/*"],
       "js": ["content_script.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["youtube_focus.js"],
+      "run_at": "document_start"
     }
   ],
   "action": {
@@ -67,5 +72,6 @@
       "resources": ["blocked.html", "analytics.html", "help.html", "gamification.js"],
       "matches": ["<all_urls>"]
     }
+    
   ]
 }
