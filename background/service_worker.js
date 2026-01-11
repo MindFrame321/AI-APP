@@ -7,6 +7,7 @@
 
 let currentSession = null;
 let pageAnalysisCache = new Map(); // Cache per domain+task
+const userAllowOverrides = new Map(); // Manual allow overrides per tab
 const CACHE_TTL = 60 * 60 * 1000; // 60 minutes (longer cache to reduce API calls)
 
 // DeclarativeNetRequest rule IDs - use range 1000-1999 for always-block rules
@@ -802,6 +803,7 @@ async function endSession() {
   }
   
   pageAnalysisCache.clear();
+  userAllowOverrides.clear();
   console.log('Page cache cleared');
   
   // Notify all tabs to stop blocking
@@ -1383,6 +1385,27 @@ async function analyzeAndBlockPage(tabId, url) {
     
     const normalizedDomain = normalizeDomain(domain);
     const normalizedAlwaysAllow = (settings.alwaysAllow || []).map(normalizeDomain).filter(d => d);
+
+    // Respect manual allow overrides (user convinced the coach)
+    const override = userAllowOverrides.get(tabId);
+    const urlOrigin = (() => {
+      try { return new URL(url).origin; } catch (_) { return ''; }
+    })();
+    if (override) {
+      const expired = override.expiresAt && Date.now() > override.expiresAt;
+      const sessionMismatch = override.sessionId && currentSession?.sessionId && override.sessionId !== currentSession.sessionId;
+      if (expired || sessionMismatch) {
+        userAllowOverrides.delete(tabId);
+      } else {
+        const matchesOrigin = override.origin ? override.origin === urlOrigin : true;
+        const matchesUrl = override.url ? url.startsWith(override.url) : true;
+        if (matchesOrigin && matchesUrl) {
+          console.log('[Analyze] ✅ User override allow active, clearing blocks for', url);
+          sendMessageWithInjection(tabId, { action: 'clearBlocks' }).catch(() => {});
+          return;
+        }
+      }
+    }
     
     if (normalizedAlwaysAllow.includes(normalizedDomain)) {
       // Always allowed - don't block anything
@@ -3820,6 +3843,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     })();
     return true; // async
+  }
+
+  if (request.action === 'reasonOverrideAllow') {
+    (async () => {
+      try {
+        const tabId = sender.tab?.id;
+        const tabUrl = request.url || sender.tab?.url || '';
+        if (!tabId || !tabUrl) {
+          sendResponse({ success: false, error: 'Missing tab or url for override' });
+          return;
+        }
+        const origin = (() => {
+          try { return new URL(tabUrl).origin; } catch (_) { return ''; }
+        })();
+        userAllowOverrides.set(tabId, {
+          origin,
+          url: tabUrl,
+          sessionId: currentSession?.sessionId || null,
+          expiresAt: Date.now() + 30 * 60 * 1000 // 30 minutes
+        });
+        sendMessageWithInjection(tabId, { action: 'clearBlocks' }).catch(() => {});
+        sendResponse({ success: true });
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
   }
 
   if (request.action === 'pauseTaxDecision') {

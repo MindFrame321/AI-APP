@@ -420,14 +420,68 @@ function addChatMessage(role, text) {
   return msg;
 }
 
-async function submitChat(prefilled) {
+function showReasonFailPopup(message) {
+  const existing = document.getElementById('focufy-reason-fail');
+  if (existing) existing.remove();
+  const wrap = document.createElement('div');
+  wrap.id = 'focufy-reason-fail';
+  wrap.style.cssText = `
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 100000001;
+    display: flex; align-items: center; justify-content: center; padding: 18px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  `;
+  wrap.innerHTML = `
+    <div style="background:#0f172a; color:#e2e8f0; width:min(420px, 100%); border-radius:16px; padding:20px; box-shadow:0 30px 80px rgba(0,0,0,0.4); border:1px solid rgba(0,226,139,0.4); text-align:center;">
+      <div style="font-size:18px; font-weight:700; margin-bottom:6px;">AI coach unavailable</div>
+      <div style="font-size:13px; opacity:0.9; margin-bottom:14px;">${message || 'Reasoning timed out. Check your API key and try again.'}</div>
+      <div style="display:flex; gap:10px; justify-content:center;">
+        <button id="focufy-reason-retry" style="padding:10px 14px; border-radius:12px; border:1px solid rgba(0,226,139,0.6); background:#111827; color:#e2e8f0; cursor:pointer;">Retry</button>
+        <button id="focufy-reason-close" style="padding:10px 14px; border-radius:12px; border:1px solid rgba(255,255,255,0.12); background:#1f2937; color:#9ca3af; cursor:pointer;">Close</button>
+      </div>
+    </div>
+  `;
+  document.body ? document.body.appendChild(wrap) : document.documentElement.appendChild(wrap);
+  wrap.querySelector('#focufy-reason-close')?.addEventListener('click', () => wrap.remove());
+  wrap.querySelector('#focufy-reason-retry')?.addEventListener('click', () => {
+    wrap.remove();
+    openReasonChat('Explain why this was blocked and whether it relates to my goal.');
+  });
+}
+
+function isReasonAllowing(answer) {
+  if (!answer) return false;
+  const text = answer.toLowerCase();
+  if (text.includes('not relevant') || text.includes('irrelevant') || text.includes('avoid') || text.includes('off-task')) {
+    return false;
+  }
+  return text.includes('relevant') || text.includes('related') || text.includes('allow') || text.includes('okay') || text.includes('supports') || text.includes('fits your goal');
+}
+
+function showReasonSuccessToast() {
+  const existing = document.getElementById('focufy-reason-success');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.id = 'focufy-reason-success';
+  toast.style.cssText = `
+    position: fixed; bottom: 18px; right: 18px; z-index: 100000002;
+    background: #0f172a; color: #e2e8f0; padding: 12px 16px; border-radius: 12px;
+    border: 1px solid rgba(0,226,139,0.6); box-shadow: 0 20px 40px rgba(0,0,0,0.35);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px;
+  `;
+  toast.textContent = 'Coach agreed. Unblocking this page.';
+  document.body ? document.body.appendChild(toast) : document.documentElement.appendChild(toast);
+  setTimeout(() => toast.remove(), 3200);
+}
+
+async function submitChat(prefilled, options = {}) {
+  const { showFailurePopup = false, reasonUnlock = false } = options;
   const text = (prefilled || chatInputEl?.value || '').trim();
-  if (!text) return;
+  if (!text) return { success: false, error: 'No prompt' };
   if (chatInputEl) chatInputEl.value = '';
   
   addChatMessage('user', text);
   const thinkingEl = addChatMessage('bot', 'Thinking...');
-  if (!thinkingEl) return;
+  if (!thinkingEl) return { success: false, error: 'UI missing' };
   
   try {
     const selection = window.getSelection ? (window.getSelection().toString() || '') : '';
@@ -443,12 +497,25 @@ async function submitChat(prefilled) {
     
     if (response?.success && response.answer) {
       if (thinkingEl) thinkingEl.textContent = response.answer;
+      if (reasonUnlock && isReasonAllowing(response.answer)) {
+        clearAllBlocks();
+        showReasonSuccessToast();
+        try {
+          chrome.runtime.sendMessage({ action: 'reasonOverrideAllow', url: window.location.href });
+        } catch (_) {}
+      }
+      return { success: true, answer: response.answer };
     } else {
-      if (thinkingEl) thinkingEl.textContent = response?.error || 'I could not answer right now.';
+      const msg = response?.error || 'I could not answer right now.';
+      if (thinkingEl) thinkingEl.textContent = msg;
+      if (showFailurePopup) showReasonFailPopup(msg);
+      return { success: false, error: msg };
     }
   } catch (error) {
     console.error('[Focufy] Chatbot error:', error);
     if (thinkingEl) thinkingEl.textContent = 'Chatbot hit an error. Please try again.';
+    if (showFailurePopup) showReasonFailPopup(error?.message || 'AI request failed.');
+    return { success: false, error: error?.message || 'AI error' };
   }
 }
 
@@ -480,11 +547,14 @@ function showOffTaskOverlay(reason) {
 function openReasonChat(reasonText) {
   // ensure chatbot UI exists
   maybeInitChatbotUI();
-  if (!chatPanelEl || !chatToggleEl) return;
+  if (!chatPanelEl || !chatToggleEl) {
+    showReasonFailPopup('AI coach UI is unavailable. Re-open the popup or check permissions.');
+    return;
+  }
   // open chat and send a prompt to reason about relevance
   chatPanelEl.classList.add('open');
   const prompt = `I think this page might be blocked. ${reasonText} Please decide if it actually supports my focus: "${currentSession?.taskDescription || 'my goal'}". If it does, explain why. If not, tell me briefly.`;
-  submitChat(prompt);
+  submitChat(prompt, { showFailurePopup: true, reasonUnlock: true });
 }
 
 // Quiz modal for unlocking
@@ -840,6 +910,27 @@ function clearAllBlocks() {
   // Remove overlay if present
   const overlay = document.getElementById('focus-ai-overlay');
   if (overlay) overlay.remove();
+
+  // Restore page visibility if full-page block hid everything
+  if (document.body) {
+    Array.from(document.body.children).forEach(child => {
+      if (child.id !== 'focus-ai-overlay') {
+        child.style.display = '';
+        child.style.visibility = '';
+      }
+    });
+  }
+  if (document.documentElement) {
+    Array.from(document.documentElement.children).forEach(child => {
+      if (child.tagName !== 'BODY' && child.id !== 'focus-ai-overlay') {
+        child.style.display = '';
+        child.style.visibility = '';
+      }
+    });
+  }
+  if (window.focusAIObserver) {
+    try { window.focusAIObserver.disconnect(); } catch (_) {}
+  }
 }
 
 // Block entire page
