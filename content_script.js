@@ -949,12 +949,20 @@ function blockEntirePage(reason) {
   
   // Also hide the body content - more aggressive blocking
   const hideAllContent = () => {
+    const allowIds = new Set([
+      'focus-ai-overlay',
+      'focufy-chat-container',
+      'focufy-reason-fail',
+      'focufy-reason-success',
+      'focufy-quiz-modal'
+    ]);
+    const shouldKeep = (el) => allowIds.has(el.id);
     if (document.body) {
       document.body.style.overflow = 'hidden';
       document.body.style.position = 'relative';
       // Hide all direct children of body except the overlay
       Array.from(document.body.children).forEach(child => {
-        if (child.id !== 'focus-ai-overlay') {
+        if (!shouldKeep(child)) {
           child.style.display = 'none';
           child.style.visibility = 'hidden';
         }
@@ -962,7 +970,7 @@ function blockEntirePage(reason) {
       // Also hide html element content
       if (document.documentElement) {
         Array.from(document.documentElement.children).forEach(child => {
-          if (child.tagName !== 'BODY' && child.id !== 'focus-ai-overlay') {
+          if (child.tagName !== 'BODY' && !shouldKeep(child)) {
             child.style.display = 'none';
             child.style.visibility = 'hidden';
           }
@@ -1094,7 +1102,23 @@ function showBlockedOverlay(reason) {
   setTimeout(() => {
     const backBtn = document.getElementById('focufyBackBtn');
     const reasonBtn = document.getElementById('focufyReasonBtn');
-    if (backBtn) backBtn.addEventListener('click', () => window.history.back());
+    if (backBtn) backBtn.addEventListener('click', () => {
+      const currentUrl = window.location.href;
+      const ref = document.referrer;
+      let attempted = false;
+      // Try normal history back first
+      if (window.history && window.history.length > 1) {
+        window.history.back();
+        attempted = true;
+      }
+      // Fallback after a short delay if we are still on the same URL
+      setTimeout(() => {
+        if (window.location.href === currentUrl) {
+          const target = ref && ref !== currentUrl ? ref : 'about:blank';
+          window.location.assign(target);
+        }
+      }, attempted ? 700 : 0);
+    });
     if (reasonBtn) reasonBtn.addEventListener('click', () => {
       toggleChatPanel();
       openReasonChat('Explain why this page was blocked and whether it can still support my study goal.');
