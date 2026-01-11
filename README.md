@@ -41,7 +41,7 @@ This is a simple focus helper for the browser. It blocks distracting sites and a
 - If AI calls fail, the extension falls back to simpler keyword checks.
 
 ## Debug tips
-- Check service worker logs in chrome://extensions → Inspect views.
+- Check service worker logs in chrome://extensions → Inspect iews.
 - Content script logs show when it loads and when it hides elements.
 - If messaging fails, make sure the page is allowed and host permissions include it.
 

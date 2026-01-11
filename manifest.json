@@ -70,7 +70,7 @@
   "web_accessible_resources": [
     {
       "resources": ["blocked.html", "analytics.html", "help.html", "gamification.js"],
-      "matches": ["<all_urls>"]
+      "matches": ["<all_urls>"] 
     }
     
   ]

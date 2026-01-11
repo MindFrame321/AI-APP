@@ -23,6 +23,18 @@ async function writeSettingsRaw(settings) {
   await chrome.storage.local.set({ settings });
 }
 
+async function persistSettings(settings) {
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'saveSettings', settings });
+    if (resp && resp.success) return true;
+    throw new Error(resp?.error || 'Unknown error');
+  } catch (err) {
+    console.warn('[Settings] save via background failed, falling back to local-only:', err);
+    await writeSettingsRaw(settings);
+    return false;
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   await checkSessionStatus();
   await loadSettings();
@@ -241,7 +253,7 @@ async function saveSettings() {
     currentSettings.dataRetentionDays = retentionInput ? parseInt(retentionInput.value || '90', 10) || 90 : 90;
     currentSettings.contextualRules = readRulesFromUI();
     
-    await writeSettingsRaw(currentSettings);
+    await persistSettings(currentSettings);
     
     // Update declarativeNetRequest blocking rules
     try {

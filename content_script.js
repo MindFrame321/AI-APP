@@ -1006,7 +1006,7 @@ function showBlockedOverlay(reason) {
     if (backBtn) backBtn.addEventListener('click', () => window.history.back());
     if (reasonBtn) reasonBtn.addEventListener('click', () => {
       toggleChatPanel();
-      submitChat('Explain why this page was blocked and if it can be allowed. Provide guidance to proceed.');
+      openReasonChat('Explain why this page was blocked and whether it can still support my study goal.');
     });
   }, 50);
   

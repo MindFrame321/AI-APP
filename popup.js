@@ -987,6 +987,8 @@ async function signInWithGoogle() {
       const userInfo = await fetchUserInfoFromGoogle(manifestToken);
       if (userInfo && userInfo.email) {
         await chrome.storage.local.set({ user: userInfo, authToken: manifestToken, tokenTimestamp: Date.now() });
+        await chrome.storage.sync.set({ userEmail: userInfo.email });
+        await chrome.storage.local.set({ userEmail: userInfo.email });
         await showUserProfile(userInfo);
         hideLoginScreen();
         showStatus('Signed in successfully!', 'success');
@@ -1121,13 +1123,15 @@ async function signInWithGoogle() {
     }
     
     // Save user and token to storage
-    console.log('Saving user to storage...');
-    await chrome.storage.local.set({ 
-      user: userInfo,
-      authToken: token,
-      tokenTimestamp: Date.now()
-    });
-    console.log('User saved to storage');
+  console.log('Saving user to storage...');
+  await chrome.storage.local.set({ 
+    user: userInfo,
+    authToken: token,
+    tokenTimestamp: Date.now()
+  });
+  await chrome.storage.sync.set({ userEmail: userInfo.email });
+  await chrome.storage.local.set({ userEmail: userInfo.email });
+  console.log('User saved to storage');
     
     await new Promise(resolve => setTimeout(resolve, 200));
     

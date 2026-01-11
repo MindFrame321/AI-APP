@@ -188,7 +188,7 @@ const DEBUG_BYPASS_CACHE = true; // ignore cached analyses
 const CURRENT_MODEL_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 const CURRENT_MODEL_NAME = 'gemini-2.0-flash';
 // Hardcoded Gemini key (can be overridden in settings.apiKey/geminiApiKey)
-const DEFAULT_API_KEY = 'AIzaSyCLgCcyLJqDSFnzvpVlwxo9DaMaFeGpcVo';
+const DEFAULT_API_KEY = 'AIzaSyANL5Tz23Eqb1hvvspvqBaO337ZprTqVJY';
 
 async function getBackendUrl() {
   return ''; // disable backend usage for now
@@ -1364,6 +1364,11 @@ async function analyzeAndBlockPage(tabId, url) {
     const aiEnabledRaw = settings.aiFeaturesEnabled !== false && !!backendUrl;
     const aiEnabled = DEBUG_FORCE_AI ? true : aiEnabledRaw;
     console.log('[Analyze] AI enabled:', aiEnabled, '(raw:', aiEnabledRaw, ') Backend URL:', backendUrl || 'missing', 'Cache bypass:', DEBUG_BYPASS_CACHE);
+
+    const relevanceClassifier = await classifyPageRelevance(tabId, url, currentSession);
+    if (relevanceClassifier) {
+      console.log('[Relevance] Classifier verdict:', relevanceClassifier.verdict, 'confidence:', relevanceClassifier.confidence, 'reason:', relevanceClassifier.reason);
+    }
     
     // Double-check always-allow (safety net in case webNavigation missed it)
     const normalizeDomain = (d) => {
@@ -1637,6 +1642,7 @@ async function analyzeAndBlockPage(tabId, url) {
       shouldBlock: analysis.shouldBlock || false,
       score: analysis.score || 50,
       hasRelatedContent: analysis.hasRelatedContent || false,
+      relevance: relevanceClassifier || null,
       timestamp: Date.now()
     };
     
@@ -1649,6 +1655,20 @@ async function analyzeAndBlockPage(tabId, url) {
       pageAnalysisCache.delete(firstKey);
     }
     
+    if (relevanceClassifier) {
+      analysis.relevance = relevanceClassifier;
+      if (relevanceClassifier.verdict === 'irrelevant' && relevanceClassifier.confidence >= 0.65) {
+        analysis.shouldBlock = true;
+        analysis.reason = analysis.reason || 'classifier-irrelevant';
+        if (!analysis.selectorsToBlock || analysis.selectorsToBlock.length === 0) {
+          analysis.selectorsToBlock = ['body'];
+        }
+      }
+      if (relevanceClassifier.verdict === 'relevant') {
+        analysis.reason = analysis.reason ? `${analysis.reason}; classifier-relevant` : 'classifier-relevant';
+      }
+    }
+
     // Ensure analysis exists
     if (!analysis) {
       console.error('[Block] No analysis result!');
@@ -1669,7 +1689,8 @@ async function analyzeAndBlockPage(tabId, url) {
     console.log('[Block] Analysis:', {
       shouldBlock: analysis.shouldBlock,
       selectorsCount: selectors.length,
-      reason: analysis.reason
+      reason: analysis.reason,
+      relevance: analysis.relevance ? `${analysis.relevance.verdict}(${analysis.relevance.confidence.toFixed(2)})` : 'unknown'
     });
     
     try {
@@ -1777,6 +1798,162 @@ async function extractPageContent(tabId) {
     return content;
   } catch (error) {
     console.error('[Extract] Error extracting page content:', error);
+    return null;
+  }
+}
+
+const MAX_CHUNK_LENGTH = 600;
+const MAX_PAYLOAD_CHARS = 3200;
+
+function truncateString(value, max) {
+  if (!value) return '';
+  return value.length > max ? `${value.slice(0, max - 3)}...` : value;
+}
+
+async function gatherRelevanceContext(tabId) {
+  try {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const title = document.title || '';
+        const metaEl = document.querySelector('meta[name=\"description\"]');
+        const metaDescription = metaEl?.content || '';
+        const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4'))
+          .map(h => h.textContent?.trim())
+          .filter(Boolean)
+          .slice(0, 6);
+        const article = document.querySelector('article');
+        const bodyText = (article?.innerText || document.body?.innerText || '').replace(/\\s+/g, ' ').trim();
+        const url = window.location.href;
+        return {
+          title,
+          metaDescription,
+          headings,
+          text: bodyText,
+          url
+        };
+      }
+    });
+    const context = result?.result;
+    if (!context || !context.text) return null;
+    return {
+      title: context.title,
+      metaDescription: context.metaDescription,
+      headings: context.headings || [],
+      text: context.text,
+      url: context.url
+    };
+  } catch (error) {
+    console.error('[Relevance] gather context failed:', error);
+    return null;
+  }
+}
+
+function chunkText(text) {
+  if (!text) return [];
+  const sentences = text.match(/[^\.\!?]+[\.\!?]?/g) || [text];
+  const chunks = [];
+  let buffer = '';
+  sentences.forEach(sentence => {
+    const trimmed = sentence.trim();
+    if (!trimmed) return;
+    if ((buffer + ' ' + trimmed).trim().length <= MAX_CHUNK_LENGTH) {
+      buffer = `${buffer} ${trimmed}`.trim();
+    } else {
+      if (buffer) chunks.push(buffer);
+      buffer = trimmed;
+    }
+  });
+  if (buffer) chunks.push(buffer);
+  return chunks.filter(c => c.length >= 40);
+}
+
+function scoreChunk(chunk, keywords) {
+  const lower = chunk.toLowerCase();
+  let score = lower.length / 100;
+  keywords.forEach(word => {
+    if (word && lower.includes(word)) {
+      score += 5;
+    }
+  });
+  return score;
+}
+
+function selectTopChunks(chunks, keywords, limit = 4) {
+  const scored = chunks.map((chunk, index) => ({
+    chunk: truncateString(chunk, MAX_CHUNK_LENGTH),
+    index,
+    score: scoreChunk(chunk, keywords)
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit);
+}
+
+function buildRelevancePayload(goal, context, selectedChunks) {
+  const payload = {
+    goal: truncateString(goal, 120),
+    url: context.url,
+    title: truncateString(context.title, 120),
+    meta: truncateString(context.metaDescription, 180),
+    headings: context.headings.map(h => truncateString(h, 80)).slice(0, 4),
+    chunks: selectedChunks.map(c => ({
+      index: c.index,
+      text: c.chunk
+    }))
+  };
+  return payload;
+}
+
+function parseRelevanceResponse(text) {
+  if (!text) return null;
+  const match = text.match(/\\{[\\s\\S]*\\}/);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[0]);
+    if (!parsed.verdict || !['relevant','irrelevant','uncertain'].includes(parsed.verdict)) return null;
+    return {
+      verdict: parsed.verdict,
+      confidence: Math.max(0, Math.min(1, parseFloat(parsed.confidence) || 0)),
+      reason: parsed.reason ? truncateString(parsed.reason, 120) : 'No reason provided'
+    };
+  } catch (error) {
+    console.warn('[Relevance] parse response failed:', error);
+    return null;
+  }
+}
+
+async function classifyPageRelevance(tabId, url, session) {
+  if (!session || !session.taskDescription) return null;
+  try {
+    const context = await gatherRelevanceContext(tabId);
+    if (!context) return null;
+    const rawChunks = chunkText(context.text);
+    if (!rawChunks.length) return null;
+    const keywords = Array.from(new Set((session.taskDescription || '').toLowerCase().split(/\\W+/).filter(Boolean)));
+    const selectedChunks = selectTopChunks(rawChunks, keywords);
+    if (!selectedChunks.length) return null;
+    const payload = buildRelevancePayload(session.taskDescription, context, selectedChunks);
+    let payloadString = JSON.stringify(payload);
+    while (payloadString.length > MAX_PAYLOAD_CHARS && payload.chunks.length > 1) {
+      payload.chunks.pop();
+      payloadString = JSON.stringify(payload);
+    }
+    console.log('[Relevance] extracted chars:', context.text.length, 'rawChunks:', rawChunks.length);
+    console.log('[Relevance] selected indices:', selectedChunks.map(c => c.index));
+    console.log('[Relevance] payload size:', payloadString.length);
+    const prompt = `You are a focus relevance classifier for Focufy. Only return JSON that matches: {\"verdict\":\"relevant|irrelevant|uncertain\",\"confidence\":0-1,\"reason\":\"short explanation\"}. Do not include extra text. Use the following payload to decide: ${payloadString}`;
+    const response = await callRenderLLM(prompt);
+    const parsed = parseRelevanceResponse(response);
+    if (parsed) return parsed;
+    console.warn('[Relevance] LLM did not return valid JSON, falling back to heuristic');
+    const fallbackConfidence = Math.min(0.5 + selectedChunks[0].score / 20, 0.95);
+    return {
+      verdict: 'uncertain',
+      confidence: fallbackConfidence,
+      reason: 'LLM response invalid or missing'
+    };
+  } catch (error) {
+    console.error('[Relevance] classifier failed:', error);
     return null;
   }
 }
@@ -3473,6 +3650,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     (async () => {
       await capturePosthogEvent(request.event || 'custom', request.properties || {});
       sendResponse({ success: true });
+    })();
+    return true;
+  }
+
+  if (request.action === 'saveSettings') {
+    (async () => {
+      try {
+        const settings = request.settings || {};
+        await writeSettingsRaw(settings);
+        sendResponse({ success: true });
+      } catch (err) {
+        console.warn('[Settings] saveSettings message failed:', err);
+        sendResponse({ success: false, error: err?.message || 'Failed to save settings' });
+      }
     })();
     return true;
   }
